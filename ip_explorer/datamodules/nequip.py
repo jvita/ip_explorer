@@ -10,7 +10,7 @@ from nequip.data.dataloader import DataLoader
 
 class NequIPDataModule(PLDataModuleWrapper):
 
-    def __init__(self, stage, batch_size, collate_fn=None):
+    def __init__(self, stage, **kwargs):
         """
         Arguments:
 
@@ -22,15 +22,8 @@ class NequIPDataModule(PLDataModuleWrapper):
                         splits. Note that the configuration file should have the
                         'dataset', 'test_dataset', and 'validation_dataset'
                         keys.
-
-            batch_size (int):
-                The batch size, to be passed directly to the data loaders
-
-            collate_fn (callable):
-                A function for collating batch samples. See PyTorch
-                documentation regarding `collate_fn` for more details.
         """
-        super().__init__(stage=stage, batch_size=batch_size, collate_fn=None)
+        super().__init__(stage=stage, **kwargs)
 
 
     def setup(self, stage, **kwargs):
@@ -59,4 +52,8 @@ class NequIPDataModule(PLDataModuleWrapper):
         self.val_dataset    = dataset_from_config(dataset_config, prefix="validation_dataset")
 
     def get_dataloader(self, dataset):
-        return DataLoader(dataset, batch_size=self.batch_size)
+        return DataLoader(
+            dataset,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers
+        )

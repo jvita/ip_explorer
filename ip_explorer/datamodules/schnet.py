@@ -1,12 +1,15 @@
 from .base import PLDataModuleWrapper
 
+import os
+import numpy as np
+
 import schnetpack.transform as tform
 from schnetpack.data import AtomsLoader, AtomsDataFormat
 from schnetpack.data.datamodule import AtomsDataModule
 
 
 class SchNetDataModule(PLDataModuleWrapper):
-    def __init__(self, stage, batch_size, collate_fn=None):
+    def __init__(self, stage, **kwargs):
         """
         Arguments:
 
@@ -15,15 +18,8 @@ class SchNetDataModule(PLDataModuleWrapper):
 
                     * `full.db`: the formatted schnetpack.data.ASEAtomsData database
                     * `split.npz`: the file specifying the train/val/test split indices
-
-            batch_size (int):
-                The batch size, to be passed directly to the data loaders
-
-            collate_fn (callable):
-                A function for collating batch samples. See PyTorch
-                documentation regarding `collate_fn` for more details.
         """
-        super().__init__(stage=stage, batch_size=batch_size, collate_fn=None)
+        super().__init__(stage=stage, **kwargs)
 
 
     def setup(self, stage, **kwargs):
@@ -33,17 +29,20 @@ class SchNetDataModule(PLDataModuleWrapper):
         __init__()
         """
 
+        if 'cutoff' not in kwargs:
+            raise RuntimeError("Must specify cutoff distance for SchNetDataModule. Use --additional-kwargs argument.")
+
         datamodule = AtomsDataModule(
-            datapath=os.path.join(data_dir, 'full.db'),
-            split_file=os.path.join(data_dir, 'split.npz'),
+            datapath=os.path.join(stage, 'full.db'),
+            split_file=os.path.join(stage, 'split.npz'),
             format=AtomsDataFormat.ASE,
             load_properties=['energy', 'forces'],
-            batch_size=batch_size,
-            num_workers=int(np.floor(int(os.environ['LSB_MAX_NUM_PROCESSORS'])/int(os.environ['GPUS_PER_NODE']))),
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
             shuffle_train=False,
             transforms=[
                 tform.RemoveOffsets('energy', remove_mean=True, remove_atomrefs=False),
-                tform.MatScipyNeighborList(cutoff=cutoff),
+                tform.MatScipyNeighborList(cutoff=float(kwargs['cutoff'])),
             ],
         )
 
@@ -56,9 +55,9 @@ class SchNetDataModule(PLDataModuleWrapper):
 
     def get_dataloader(self, dataset):
         return AtomsLoader(
-                dataaset,
+                dataset,
                 batch_size=self.batch_size,
-                # num_workers=self.num_workers,
+                num_workers=self.num_workers,
                 # shuffle=True,
                 # pin_memory=self._pin_memory,
             )

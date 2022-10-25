@@ -10,9 +10,10 @@ class PLDataModuleWrapper(pl.LightningDataModule):
     `get_dataloader()`.
     """
 
-    def __init__(self, stage, batch_size, collate_fn=None, **kwargs):
+    def __init__(self, stage, batch_size, num_workers, collate_fn=None, **kwargs):
         super().__init__()
         self.batch_size     = batch_size
+        self.num_workers    = num_workers
         self.collate_fn     = collate_fn
 
         self.train_dataset = self.test_dataset = self.val_dataset = None
