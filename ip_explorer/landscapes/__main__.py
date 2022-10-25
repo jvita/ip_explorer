@@ -23,9 +23,9 @@ import loss_landscapes
 import loss_landscapes.metrics
 from loss_landscapes.model_interface.model_wrapper import SimpleModelWrapper
 
-from ip_explorer.loaders.datamodules import get_datamodule_wrapper
-from ip_explorer.loaders.models import get_model_wrapper
-from ip_explorer.landscapes.loss import SchNetLoss, NequIPLoss
+from ip_explorer.datamodules import get_datamodule_wrapper
+from ip_explorer.models import get_model_wrapper
+from ip_explorer.landscapes.loss import EnergyForceLoss
 
 parser = argparse.ArgumentParser(
     description="Generate loss landscapes"
@@ -36,13 +36,19 @@ parser.add_argument( '--seed', type=int, help='The random seed to use', dest='se
 parser.add_argument( '--num-nodes', type=int, help='The number of nodes available for training', dest='num_nodes', required=True,) 
 parser.add_argument( '--gpus-per-node', type=int, help='The number of GPUs per node to use', dest='gpus_per_node', default=1, required=False,) 
 
+parser.add_argument( '--prefix', type=str, help='Prefix to add to the beginning of logged files', dest='prefix', default='', required=False)
 parser.add_argument( '--save-dir', type=str, help='Directory in which to save the results. Created if does not exist', dest='save_dir', required=True)
 parser.add_argument( '--overwrite', help='Allows save_directory to be overwritten', action='store_true')
 parser.add_argument( '--no-ovewrite', action='store_false', dest='overwrite')
-parser.set_defaults(overwrite=True)
+parser.set_defaults(overwrite=False)
+
 parser.add_argument( '--model-type', type=str, help='Type of model being used.  Must be one of the supported types from ip_explorer', dest='model_type', required=True)
 parser.add_argument( '--database-path', type=str, help='Path to formatted schnetpack.data.ASEAtomsData database', dest='database_path', required=True)
 parser.add_argument( '--model-path', type=str, help='Full path to model checkpoint file', dest='model_path', required=True,) 
+
+parser.add_argument( '--compute-initial-losses', help='Computes and logs the train/test/val losses of the inital model', action='store_true')
+parser.add_argument( '--no-compute-initial-losses', action='store_false', dest='compute_initial_losses')
+parser.set_defaults(compute_initial_losses=True)
 
 parser.add_argument( '--batch-size', type=int, help='Batch size for data loaders', dest='batch_size', default=128, required=False,)
 
@@ -50,6 +56,8 @@ parser.add_argument( '--loss-type', type=str, help='"energy", "force" or None', 
 parser.add_argument( '--cutoff', type=float, help='Pair distance cutoff. Only needed for SchNet', dest='cutoff', required=True)
 parser.add_argument( '--distance', type=float, help='Fractional distance in parameterspace', dest='distance', required=True,) 
 parser.add_argument( '--steps', type=int, help='Number of grid steps in each direction in parameter space', dest='steps', required=True,) 
+
+parser.add_argument( '--additional-kwargs', type=str, help='A string of additional key-value argument pairs that will be passed to the model and datamodule wrappers. Format: "key1:value1 key2:value2"', dest='additional_kwargs', required=False, default='') 
 
 args = parser.parse_args()
 
@@ -71,130 +79,111 @@ torch.backends.cudnn.deterministic = True
 
 def main():
     # Setup
-    # if args.model_type == 'schnet':
-    #     datamodule = load_datamodule(
-    #         args.model_type,
-    #         args.database_path,
-    #         args.batch_size,
-    #         cutoff=args.cutoff,
-    #     )
+    if not os.path.isdir(args.save_dir):
+        os.makedirs(args.save_dir)
 
-    #     # model = load_model(args.model_type, args.model_path, copy_to_cwd=True)
-    # elif args.model_type == 'nequip':
-    #     datamodule = load_datamodule(
-    #         args.model_type,
-    #         args.database_path,
-    #         args.batch_size,
-    #     )
+    os.chdir(args.save_dir)
+    print("Saving results in:", args.save_dir)
 
-    #     # model = load_model(args.model_type, args.model_path, copy_to_cwd=True)
+    additional_kwargs = {}
+    for kv_pair in args.additional_kwargs.split():
+        k, v = kv_pair.split(':')
+        additional_kwargs[k] = v
 
-    datamodule  = get_datamodule_wrapper(args.model_type)(args.database_path, args.batch_size)
-    model       = get_model_wrapper(args.model_type)(args.model_path, copy_to_cwd=True)
-
-    model.eval()
-    model_final = SimpleModelWrapper(model)
-    start_point = model_final.get_module_parameters()
-
-    logger = pl.loggers.CSVLogger(save_dir=args.save_dir)
-
-    # TODO: use devices=1 for train/test/val verification to avoid duplicating
-    # data, as suggested on this page:
-    # https://pytorch-lightning.readthedocs.io/en/stable/common/evaluation_intermediate.html
-
-    trainer = pl.Trainer(
-        num_nodes=args.num_nodes,
-        devices=4,
-        accelerator='cuda',
-        strategy='ddp',
+    datamodule = get_datamodule_wrapper(args.model_type)(
+        args.database_path,
+        batch_size=args.batch_size,
+        num_workers=int(np.floor(int(os.environ['LSB_MAX_NUM_PROCESSORS'])/int(os.environ['GPUS_PER_NODE']))),
+        **additional_kwargs,
+    )
+    model = get_model_wrapper(args.model_type)(
+        args.model_path,
+        copy_to_cwd=True,
+        **additional_kwargs,
     )
 
-    print('Computing training errors with devices=1', flush=True)
-    trainer.test(model, dataloaders=datamodule.train_dataloader())
-    print('Computing validation errors with devices=1', flush=True)
-    trainer.test(model, dataloaders=datamodule.val_dataloader())
-    print('Computing testing errors with devices=1', flush=True)
-    trainer.test(model, dataloaders=datamodule.test_dataloader())
+    model.eval()
 
-    # # Generate random directions
-    # dir_one = rand_u_like(start_point)
-    # dir_two = orthogonal_to(start_point)
+    if args.compute_initial_losses:
 
-    # # Filter normalize
-    # dir_one.filter_normalize_(start_point)
-    # dir_two.filter_normalize_(start_point)
+        # TODO: use devices=1 for train/test/val verification to avoid
+        # duplicating data, as suggested on this page:
+        # https://pytorch-lightning.readthedocs.io/en/stable/common/evaluation_intermediate.html
 
-    # # scale to match steps and total distance; used for shifting models on each # rank
-    # scaling_one = ((start_point.model_norm() * args.distance) / args.steps) / dir_one.model_norm()
-    # scaling_two = ((start_point.model_norm() * args.distance) / args.steps) / dir_two.model_norm()
-    # dir_one.mul_(scaling_one)
-    # dir_two.mul_(scaling_two)
+        # Compute initial train/val/test losses
+        trainer = pl.Trainer(
+            num_nodes=1,
+            devices=1,
+            accelerator='cuda',
+        )
 
-    # # Shift starting points to correct positions depending upon rank
-    # steps_per_worker_along_dim1 = int(np.floor(args.steps/(world_size*args.gpus_per_node)))
+        print('Computing training errors with devices=1 to avoid batch padding errors', flush=True)
+        trainer.test(model, dataloaders=datamodule.train_dataloader())
+        train_eloss, train_floss = model.rmse_eng, model.rmse_fcs
+        print('Computing validation errors with devices=1 to avoid batch padding errors', flush=True)
+        trainer.test(model, dataloaders=datamodule.val_dataloader())
+        val_eloss, val_floss = model.rmse_eng, model.rmse_fcs
+        print('Computing testing errors with devices=1 to avoid batch padding errors', flush=True)
+        trainer.test(model, dataloaders=datamodule.test_dataloader())
+        test_eloss, test_floss = model.rmse_eng, model.rmse_fcs
 
-    # if world_rank == world_size-1:
-    #     # Assign any leftovers to rank 0
-    #     steps_per_worker_along_dim1 = args.steps - steps_per_worker_along_dim1*world_size*args.gpus_per_node
+        print('E_RMSE (eV/atom), F_RMSE (eV/Ang)')
+        print(f'\tTrain:\t{train_eloss}, \t{train_floss}')
+        print(f'\tTest:\t{test_eloss}, \t{test_floss}')
+        print(f'\tVal:\t{val_eloss}, \t{val_floss}')
 
-    # steps_along_dir1 = world_comm.allgather(steps_per_worker_along_dim1)
+        errors = np.array([
+            [train_eloss, train_floss],
+            [test_eloss, test_floss],
+            [val_eloss, val_floss],
+        ])
 
-    # print(f'RANK {world_rank} steps: {steps_along_dir1}')
+        np.savetxt(
+            os.path.join(args.save_dir, args.prefix+'errors'),
+            errors,
+            header='col=[E_RMSE, F_RMSE] (eV/atom, eV/Ang); row=[train, test, val]'
+        )
 
-    # # Move back along dir_one depending upon rank
-    # dir_one.mul_(steps_per_worker_along_dim1)
-    # start_point.sub_(dir_one)
-    # dir_one.truediv_(steps_per_worker_along_dim1)
+    # Switch to using a distributed model. Note that this means there will be
+    # some noise in the generated landscapes due to batch padding.
+    trainer = pl.Trainer(
+        num_nodes=args.num_nodes,
+        devices=args.gpus_per_node,
+        accelerator='cuda',
+        strategy='ddp',
+        enable_progress_bar=False,
+    )
 
-    # # Move to beginning of dir_two
-    # dir_one.mul_(args.steps)
-    # start_point.sub_(dir_one)
-    # dir_one.truediv_(steps_per_worker_along_dim1)
+    model._val_dataloader = datamodule.val_dataloader()
 
-    # # Un-do temporary scaling now that the model has been shifted
-    # dir_one.truediv_(scaling_one)
-    # dir_two.truediv_(scaling_two)
+    metric = EnergyForceLoss(
+        evaluation_fxn = trainer.test,
+        data_loader=datamodule.train_dataloader()
+        # data_loader=datamodule
+        # data_loader=None,
+    )
 
-    raise RuntimeError
+    model_final = SimpleModelWrapper(model)  # needed for loss_landscapes
 
     loss_data_fin = loss_landscapes.random_plane(
         model_final,
-        metrics['train'],
-        distance=args.distance,  # maximum distance in parameter space
-        steps=args.steps,    # number of steps
-        normalization=None,  # they've already been filter-normalized
+        metric,
+        distance=args.distance,     # maximum distance in parameter space
+        steps=args.steps,           # number of steps
+        normalization='filter',
         deepcopy_model=True,
         n_loss_terms=2,
-        dir_one=dir_one,
-        dir_two=dir_two,
-        shift_to_center=False,
-    )
-
-    parent_folder = os.path.split(args.model_path)[0]
-
-    print("Saving results in:", parent_folder)
-
-    errors = np.array([
-        [train_eloss, train_floss],
-        [test_eloss, test_floss],
-        [val_eloss, val_floss],
-    ])
-
-    full_path = os.path.join(parent_folder, '_'.join([args.prefix, f'errors']))
-
-    np.savetxt(
-        full_path,
-        errors,
-        header='col=[E_RMSE, F_RMSE] (eV/atom, eV/Ang); row=[train, test, val]'
     )
 
     save_name = 'L={}_d={:.2f}_s={}'.format('energy', args.distance, args.steps)
-    full_path = os.path.join(parent_folder, save_name)
+    full_path = os.path.join(args.save_dir, args.prefix+save_name)
     np.save(full_path, loss_data_fin[0])
 
     save_name = 'L={}_d={:.2f}_s={}'.format('forces', args.distance, args.steps)
-    full_path = os.path.join(parent_folder, save_name)
+    full_path = os.path.join(args.save_dir, args.prefix+save_name)
     np.save(full_path, loss_data_fin[1])
+
+    print('Done generating loss landscape!')
 
 
 if __name__ == '__main__':

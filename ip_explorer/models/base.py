@@ -23,7 +23,7 @@ class PLModelWrapper(pl.LightningModule):
     model.
     """
 
-    def __init__(self, model_dir, copy_to_cwd=False):
+    def __init__(self, model_dir, copy_to_cwd=False, **kwargs):
         """
         Arguments:
 
@@ -40,7 +40,7 @@ class PLModelWrapper(pl.LightningModule):
         super().__init__()
 
         self.model = None
-        self.load_model(model_dir)
+        self.load_model(model_dir, **kwargs)
 
         if self.model is None:
             raise RuntimeError("Failed to load model. Make sure to implement `load_model()` and assign `self.model`")
@@ -125,8 +125,5 @@ class PLModelWrapper(pl.LightningModule):
         rmse_eng = np.average(self.all_gather(rmse_eng).detach().cpu().numpy())
         rmse_fcs = np.average(self.all_gather(rmse_fcs).detach().cpu().numpy())
 
-        print('RMSE:', rmse_eng, rmse_fcs)
-
-        return rmse_eng, rmse_fcs
-
-
+        self.rmse_eng = rmse_eng
+        self.rmse_fcs = rmse_fcs
