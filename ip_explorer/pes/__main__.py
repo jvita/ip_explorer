@@ -99,7 +99,7 @@ def main():
     )
     model = get_model_wrapper(args.model_type)(
         model_dir=args.model_path,
-        values_to_compute=('representations',),
+        values_to_compute=('structure_representations',),
         copy_to_cwd=True,
         **additional_kwargs,
     )
@@ -111,17 +111,17 @@ def main():
         devices=args.gpus_per_node,
         accelerator='cuda',
         strategy='ddp',
-        enable_progress_bar=False,
+        # enable_progress_bar=False,
     )
 
-    trainer.test(model, dataloaders=datamodule.val_dataloader())
+    trainer.test(model, dataloaders=datamodule.train_dataloader())
 
     representations = model.results['representations'].detach().cpu().numpy()
     representations_energies = model.results['representations_energies'].detach().cpu().numpy()
 
     images = []
     for i, (v, e) in enumerate(zip(representations, representations_energies)):
-        atoms  =  Atoms()
+        atoms  =  Atoms('H', positions=[[0,0,0]])
 
         # SHEAP searches for "energy"
         atoms.info['energy'] = e

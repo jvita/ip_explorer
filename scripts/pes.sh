@@ -20,7 +20,7 @@ export NCCL_DEBUG=INFO
 export PYTHONFAULTHANDLER=1
 export MASTER_ADDR=$(hostname)
 
-MODEL_FOLDER=MODEL_DIRECTORY
+SAVE_DIR="/g/g20/vita1/ws/logs/ip_explorer/nequip/debug"
 
 jsrun -n 1 python3 -m ip_explorer.pes \
     --seed 1123 \
@@ -30,7 +30,7 @@ jsrun -n 1 python3 -m ip_explorer.pes \
     --model-type "nequip" \
     --model-path "/g/g20/vita1/ws/projects/nequip/results/AL_Al/debug/" \
     --database-path "/g/g20/vita1/ws/projects/nequip/results/AL_Al/debug/" \
-    --save-dir "/g/g20/vita1/ws/logs/ip_explorer/nequip/debug" \
+    --save-dir ${SAVE_DIR} \
     # --model-type "schnet" \
     # --database-path "/g/g20/vita1/ws/projects/data/AL_Al/" \
     # --model-path '/g/g20/vita1/ws/logs/runs/painn/4114101-painn_initial-cutoff=7.0-n_atom_basis=30-n_interactions=3-n_rbf=20-n_layers=2-n_hidden=None-Ew=0.01-Fw=0.99-lr=0.005-epochs=5000/' \
@@ -39,3 +39,5 @@ jsrun -n 1 python3 -m ip_explorer.pes \
     # --prefix '4gpus_'
     # --no-compute-initial-losses
     # --overwrite \
+
+# sheap -st 0.6 -p 20 -hs -rs -1 < "${SAVE_DIR}/unprocessed.xyz" > processed.xyz

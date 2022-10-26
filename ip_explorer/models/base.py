@@ -172,6 +172,43 @@ class PLModelWrapper(pl.LightningModule):
         self.results['f_rmse'] = f_rmse
 
 
+    def compute_structure_representations(self, batch):
+        raise NotImplementedError
+
+
+    def aggregate_structure_representations(self, step_outputs):
+        # On each worker, compute the per-structure average representations
+        per_struct_representations = []
+        for s in step_outputs:
+            per_struct_representations += [
+                torch.mean(split, dim=0)
+                for split in torch.split(
+                    s['representations'],
+                    s['representations_splits']
+                )
+            ]
+
+        per_struct_representations = torch.vstack(per_struct_representations)
+
+        per_struct_energies = torch.cat([
+            s['representations_energy'] for s in step_outputs
+        ])
+
+        # Now gather everything
+        per_struct_representations = self.all_gather(per_struct_representations)
+        per_struct_energies = self.all_gather(per_struct_energies)
+
+        # Reshape to remove the num_processes dimension.
+        # NOTE: order is likely not going to match dataloader order
+        per_struct_representations = torch.flatten(
+            per_struct_representations, 0, 1
+        )
+        per_struct_energies = torch.flatten(per_struct_energies, 0, 1)
+
+        self.results['representations'] = per_struct_representations
+        self.results['representations_energies'] = per_struct_energies
+
+
     def on_test_epoch_start(self):
         if self.reset_results_on_epoch_start:
             self.results = {}
