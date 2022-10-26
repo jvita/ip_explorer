@@ -3,6 +3,7 @@ from .nequip import NequIPModelWrapper
 
 implemented_wrappers = {
     'schnet': SchNetModelWrapper,
+    'painn':  SchNetModelWrapper,
     'nequip': NequIPModelWrapper,
 }
 

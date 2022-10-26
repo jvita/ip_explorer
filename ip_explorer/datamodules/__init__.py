@@ -4,6 +4,7 @@ from .nequip import NequIPDataModule
 
 implemented_datamodules = {
     'schnet': SchNetDataModule,
+    'painn':  SchNetDataModule,
     'nequip': NequIPDataModule,
 }
 

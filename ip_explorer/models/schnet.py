@@ -23,18 +23,16 @@ class SchNetModelWrapper(PLModelWrapper):
 
 
     def loss_fxn(self, batch):
+        true_eng = batch['energy']/batch['_n_atoms']
+        true_fcs = batch['forces']
+
         results = self.model.forward(batch)
 
-        true_eng = batch['energy']/batch['_n_atoms']
         pred_eng = results['energy']/batch['_n_atoms']
-
-        true_fcs = batch['forces']
         pred_fcs = results['forces']
 
         ediff = (pred_eng - true_eng).detach().cpu().numpy()
         fdiff = (pred_fcs - true_fcs).detach().cpu().numpy()
-
-        print(ediff, fdiff)
 
         return {
             'energy': np.mean(ediff**2),
