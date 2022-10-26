@@ -4,7 +4,7 @@ import os
 import torch
 import shutil
 
-from nequip.data import AtomicData
+from nequip.data import AtomicData, AtomicDataDict
 from nequip.train import Trainer, Metrics
 from nequip.utils import Config, instantiate
 
@@ -26,8 +26,13 @@ class NequIPModelWrapper(PLModelWrapper):
         ```
 
     """
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, model_dir, **kwargs):
+        if 'representation_type' in kwargs:
+            self.representation_type = kwargs['representation_type']
+        else:
+            self.representation_type = 'node'
+
+        super().__init__(model_dir=model_dir, **kwargs)
 
 
     def load_model(self, traindir):
@@ -68,9 +73,71 @@ class NequIPModelWrapper(PLModelWrapper):
         return {
             'energy': results['e/N_rmse']**2,  # mse isn't implemented yet in nequip
             'force':  results['f_rmse']**2,
-            'batch_size': max(batch_dict['batch'])+1,
-            'natoms': batch_dict['forces'].shape[0],
+            'batch_size': max(batch_dict[AtomicDataDict.BATCH_KEY])+1,
+            'natoms': batch_dict[AtomicDataDict.FORCE_KEY].shape[0],
         }
+
+
+    def compute_representations(self, batch):
+        batch_dict = AtomicData.to_AtomicDataDict(batch)
+
+        out = self.model.forward(batch_dict)
+
+        with torch.no_grad():
+            z = out[AtomicDataDict.NODE_FEATURES_KEY]
+            per_atom_representations = z.new_zeros(z.shape)
+
+            if self.representation_type in ['node', 'both']:
+                per_atom_representations += z
+
+            if self.representation_type in ['edge', 'both']:
+                idx_i = out[AtomicDataDict.EDGE_INDEX_KEY][:, 0]
+                idx_j = out[AtomicDataDict.EDGE_INDEX_KEY][:, 1]
+
+                per_atom_representations.index_add_(0, idx_i, out[AtomicDataDict.EDGE_EMBEDDING_KEY])
+                per_atom_representations.index_add_(0, idx_j, out[AtomicDataDict.EDGE_EMBEDDING_KEY])
+
+        splits = torch.unique(out['batch'], return_counts=True)[1]
+        splits = splits.detach().cpu().numpy().tolist()
+
+        return {
+            'representations': per_atom_representations,
+            'representations_splits': splits,
+            'representations_energy': batch_dict[AtomicDataDict.TOTAL_ENERGY_KEY],
+        }
+
+
+    def aggregate_representations(self, step_outputs):
+        # On each worker, compute the per-structure average representations
+        per_struct_representations = []
+        for s in step_outputs:
+            per_struct_representations += [
+                torch.mean(split, dim=0)
+                for split in torch.split(
+                    s['representations'],
+                    s['representations_splits']
+                )
+            ]
+
+        per_struct_representations = torch.vstack(per_struct_representations)
+
+        per_struct_energies = torch.cat([
+            s['representations_energy'] for s in step_outputs
+        ])
+
+        # Now gather everything
+        per_struct_representations = self.all_gather(per_struct_representations)
+        per_struct_energies = self.all_gather(per_struct_energies)
+
+        # Reshape to remove the num_processes dimension.
+        # NOTE: order is likely not going to match dataloader order
+        per_struct_representations = torch.flatten(
+            per_struct_representations, 0, 1
+        )
+        per_struct_energies = torch.flatten(per_struct_energies, 0, 1)
+
+        self.results['representations'] = per_struct_representations
+        self.results['representations_energies'] = per_struct_energies
 
 
     def copy(self, traindir):

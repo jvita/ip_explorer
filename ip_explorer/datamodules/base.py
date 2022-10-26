@@ -17,7 +17,7 @@ class PLDataModuleWrapper(pl.LightningDataModule):
         self.collate_fn     = collate_fn
 
         self.train_dataset = self.test_dataset = self.val_dataset = None
-        self.setup(stage, **kwargs)
+        self.setup(stage)
 
         if self.train_dataset is None:
             raise RuntimeError("Failed to load training dataset. Make sure that `self.train_dataset` is assigned in `self.setup()`")
@@ -27,7 +27,7 @@ class PLDataModuleWrapper(pl.LightningDataModule):
             raise RuntimeError("Failed to load validation dataset. Make sure that `self.val_dataset` is assigned in `self.setup()`")
 
 
-    def setup(self, stage: Optional[str] = None, **kwargs):
+    def setup(self, stage: Optional[str] = None):
         """
         Populates the `self.train_dataset`, `self.test_dataset`, and
         `self.val_dataset` class attributes. Will be called automatically in

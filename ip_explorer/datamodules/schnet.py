@@ -19,18 +19,20 @@ class SchNetDataModule(PLDataModuleWrapper):
                     * `full.db`: the formatted schnetpack.data.ASEAtomsData database
                     * `split.npz`: the file specifying the train/val/test split indices
         """
+        if 'cutoff' not in kwargs:
+            raise RuntimeError("Must specify cutoff distance for SchNetDataModule. Use --additional-kwargs argument.")
+
+        self.cutoff = float(kwargs['cutoff'])
+
         super().__init__(stage=stage, **kwargs)
 
 
-    def setup(self, stage, **kwargs):
+    def setup(self, stage):
         """
         Populates the `self.train_dataset`, `self.test_dataset`, and
         `self.val_dataset` class attributes. Will be called automatically in
         __init__()
         """
-
-        if 'cutoff' not in kwargs:
-            raise RuntimeError("Must specify cutoff distance for SchNetDataModule. Use --additional-kwargs argument.")
 
         datamodule = AtomsDataModule(
             datapath=os.path.join(stage, 'full.db'),
@@ -42,7 +44,7 @@ class SchNetDataModule(PLDataModuleWrapper):
             shuffle_train=False,
             transforms=[
                 tform.RemoveOffsets('energy', remove_mean=True, remove_atomrefs=False),
-                tform.MatScipyNeighborList(cutoff=float(kwargs['cutoff'])),
+                tform.MatScipyNeighborList(cutoff=self.cutoff),
             ],
         )
 

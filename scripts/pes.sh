@@ -22,14 +22,11 @@ export MASTER_ADDR=$(hostname)
 
 MODEL_FOLDER=MODEL_DIRECTORY
 
-jsrun -n 1 python3 -m ip_explorer.landscapes \
+jsrun -n 1 python3 -m ip_explorer.pes \
     --seed 1123 \
     --num-nodes 1 \
-    --gpus-per-node 4 \
+    --gpus-per-node 1 \
     --batch-size 32 \
-    --loss-type 'both' \
-    --distance 0.5 \
-    --steps 5 \
     --model-type "nequip" \
     --model-path "/g/g20/vita1/ws/projects/nequip/results/AL_Al/debug/" \
     --database-path "/g/g20/vita1/ws/projects/nequip/results/AL_Al/debug/" \

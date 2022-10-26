@@ -65,7 +65,7 @@ class PLModelWrapper(pl.LightningModule):
 
         # Load model
         self.model = None
-        self.load_model(model_dir, **kwargs)
+        self.load_model(model_dir)
 
         if self.model is None:
             raise RuntimeError("Failed to load model. Make sure to implement `load_model()` and assign `self.model`")
@@ -185,12 +185,15 @@ class PLModelWrapper(pl.LightningModule):
             fxn = getattr(self, f'compute_{value}')
 
             for k,v in fxn(batch).items():
+                if k in results:
+                    raise RuntimeError(f"Key '{k}' cannot be returned by multiple compute functions")
+
                 results[k] = v
 
 
         for k,v in results.items():
             if isinstance(v, torch.Tensor):
-                results[k] = v.detach().cpu()#.numpy()
+                results[k] = v.detach()#.cpu().numpy()
 
         return results
 

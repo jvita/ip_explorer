@@ -26,7 +26,7 @@ class NequIPDataModule(PLDataModuleWrapper):
         super().__init__(stage=stage, **kwargs)
 
 
-    def setup(self, stage, **kwargs):
+    def setup(self, stage):
         """
         Arguments:
 

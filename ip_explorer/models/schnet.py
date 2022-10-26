@@ -11,11 +11,11 @@ class SchNetModelWrapper(PLModelWrapper):
     A wrapper for a SchNet model. Assumes that `model_path` contains a model
     checkpoint file with the name 'best_model'
     """
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, model_dir, **kwargs):
+        super().__init__(model_dir=model_dir, **kwargs)
 
 
-    def load_model(self, model_path, **kwargs):
+    def load_model(self, model_path):
         self.model = torch.load(
             os.path.join(model_path, 'best_model'),
             map_location=torch.device('cpu')

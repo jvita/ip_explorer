@@ -13,6 +13,9 @@ import os
 import argparse
 import numpy as np
 
+from ase import Atoms
+from ase.io import write
+
 import pytorch_lightning as pl
 
 import loss_landscapes
@@ -21,13 +24,12 @@ from loss_landscapes.model_interface.model_wrapper import SimpleModelWrapper
 
 from ip_explorer.datamodules import get_datamodule_wrapper
 from ip_explorer.models import get_model_wrapper
-from ip_explorer.landscapes.loss import EnergyForceLoss
 
 import logging
-logging.getLogger("pytorch_lightning").setLevel(logging.WARNING)
+# logging.getLogger("pytorch_lightning").setLevel(logging.WARNING)
 
 parser = argparse.ArgumentParser(
-    description="Generate loss landscapes"
+    description="Generate PES"
 )
 
 # Add CLI arguments
@@ -50,10 +52,7 @@ parser.add_argument( '--no-compute-initial-losses', action='store_false', dest='
 parser.set_defaults(compute_initial_losses=True)
 
 parser.add_argument( '--batch-size', type=int, help='Batch size for data loaders', dest='batch_size', default=128, required=False,)
-
-parser.add_argument( '--loss-type', type=str, help='"energy", "force" or None', dest='loss_type', default=None, required=False,) 
-parser.add_argument( '--distance', type=float, help='Fractional distance in parameterspace', dest='distance', required=True,) 
-parser.add_argument( '--steps', type=int, help='Number of grid steps in each direction in parameter space', dest='steps', required=True,) 
+parser.add_argument( '--slice', type=int, help='Step size to use when reducing data size via slicing', default=1, dest='slice', required=False,)
 
 parser.add_argument( '--additional-kwargs', type=str, help='A string of additional key-value argument pairs that will be passed to the model and datamodule wrappers. Format: "key1:value1 key2:value2"', dest='additional_kwargs', required=False, default='') 
 
@@ -76,6 +75,10 @@ torch.backends.cudnn.deterministic = True
 
 
 def main():
+
+    if 'SHEAP_PATH' not in os.environ:
+        print("'SHEAP_PATH' environment variable not found. Will only perform pre-processing steps")
+
     # Setup
     if not os.path.isdir(args.save_dir):
         os.makedirs(args.save_dir)
@@ -96,54 +99,13 @@ def main():
     )
     model = get_model_wrapper(args.model_type)(
         model_dir=args.model_path,
+        values_to_compute=('representations',),
         copy_to_cwd=True,
         **additional_kwargs,
     )
 
     model.eval()
 
-    if args.compute_initial_losses:
-
-        # TODO: use devices=1 for train/test/val verification to avoid
-        # duplicating data, as suggested on this page:
-        # https://pytorch-lightning.readthedocs.io/en/stable/common/evaluation_intermediate.html
-
-        # Compute initial train/val/test losses
-        trainer = pl.Trainer(
-            num_nodes=1,
-            devices=1,
-            accelerator='cuda',
-        )
-
-        print('Computing training errors with devices=1 to avoid batch padding errors', flush=True)
-        trainer.test(model, dataloaders=datamodule.train_dataloader())
-        train_eloss, train_floss = model.results['e_rmse'], model.results['f_rmse']
-        print('Computing validation errors with devices=1 to avoid batch padding errors', flush=True)
-        trainer.test(model, dataloaders=datamodule.val_dataloader())
-        val_eloss, val_floss = model.results['e_rmse'], model.results['f_rmse']
-        print('Computing testing errors with devices=1 to avoid batch padding errors', flush=True)
-        trainer.test(model, dataloaders=datamodule.test_dataloader())
-        test_eloss, test_floss = model.results['e_rmse'], model.results['f_rmse']
-
-        print('E_RMSE (eV/atom), F_RMSE (eV/Ang)')
-        print(f'\tTrain:\t{train_eloss}, \t{train_floss}')
-        print(f'\tTest:\t{test_eloss}, \t{test_floss}')
-        print(f'\tVal:\t{val_eloss}, \t{val_floss}')
-
-        errors = np.array([
-            [train_eloss, train_floss],
-            [test_eloss, test_floss],
-            [val_eloss, val_floss],
-        ])
-
-        np.savetxt(
-            os.path.join(args.save_dir, args.prefix+'errors'),
-            errors,
-            header='col=[E_RMSE, F_RMSE] (eV/atom, eV/Ang); row=[train, test, val]'
-        )
-
-    # Switch to using a distributed model. Note that this means there will be
-    # some noise in the generated landscapes due to batch padding.
     trainer = pl.Trainer(
         num_nodes=args.num_nodes,
         devices=args.gpus_per_node,
@@ -152,32 +114,35 @@ def main():
         enable_progress_bar=False,
     )
 
-    metric = EnergyForceLoss(
-        evaluation_fxn = trainer.test,
-        data_loader=datamodule.train_dataloader()
-    )
+    trainer.test(model, dataloaders=datamodule.val_dataloader())
 
-    model_final = SimpleModelWrapper(model)  # needed for loss_landscapes
+    representations = model.results['representations'].detach().cpu().numpy()
+    representations_energies = model.results['representations_energies'].detach().cpu().numpy()
 
-    loss_data_fin = loss_landscapes.random_plane(
-        model_final,
-        metric,
-        distance=args.distance,     # maximum distance in parameter space
-        steps=args.steps,           # number of steps
-        normalization='filter',
-        deepcopy_model=True,
-        n_loss_terms=2,
-    )
+    images = []
+    for i, (v, e) in enumerate(zip(representations, representations_energies)):
+        atoms  =  Atoms()
 
-    save_name = 'L={}_d={:.2f}_s={}'.format('energy', args.distance, args.steps)
-    full_path = os.path.join(args.save_dir, args.prefix+save_name)
-    np.save(full_path, loss_data_fin[0])
+        # SHEAP searches for "energy"
+        atoms.info['energy'] = e
 
-    save_name = 'L={}_d={:.2f}_s={}'.format('forces', args.distance, args.steps)
-    full_path = os.path.join(args.save_dir, args.prefix+save_name)
-    np.save(full_path, loss_data_fin[1])
+        # SHEAP searches for "SOAP*" keys
+        atoms.info['SOAP-n8-l4-c2.4-g0.3'] = v
 
-    print('Done generating loss landscape!')
+        # Filler information for SHEAP testing
+        atoms.info['name'] = str(i)
+        atoms.info['pressure']    = 0.0
+        atoms.info['spacegroup']  = 'unknown'
+        atoms.info['times_found'] = 1
+
+        images.append(atoms)
+
+    write(os.path.join(args.save_dir, 'unprocessed.xyz'), images, format='extxyz')
+
+    if 'SHEAP_PATH' not in os.environ:
+        return
+    else:
+        raise RuntimeError("SHEAP execution not supported yet. Perform SHEAP processing externally.")
 
 
 if __name__ == '__main__':
