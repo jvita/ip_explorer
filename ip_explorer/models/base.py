@@ -7,14 +7,21 @@ class PLModelWrapper(pl.LightningModule):
     """
     A model wrapper for facilitating distributed execution via Pytorch
     Lightning. When implementing a new model that sub-classes from PLModelWrapper,
-    the three functions that should be implemented are `load_model`, `loss_fxn`,
-    and `copy`.
+    the three functions that should be implemented are `load_model()`,
+    `compute_loss()`, and `copy()`. Note that the default `aggregate_loss()`
+    function will correctly aggregate MSE or MAE results; if `compute_loss()`
+    does not return these results, then you should overload `aggregate_loss()`
+    with a proper aggregation function.
 
     This wrapper utilizes the `pl.Trainer.test()` function as a workaround for
-    distributed prediction. After calling `pl.Trainer.test()`, the RMSE values
-    will be stored under the `PLModelWrapper.rmse_eng` and `PLModelWrapper.rmse_fcs`
-    variables (a workaround for the fact that the `test_epoch_end()` function
-    can't return anything yet).
+    distributed inference. In order to enable the distributed
+    evaluation/aggregation of arbitrary results, users can define `compute_*()`
+    and `aggregate_*()` functions, then utilize the `values_to_compute`
+    constructor argument to specify which values should be computed during
+    `test_step()` and aggregated during `test_epoch_end()`. At the very least,
+    `compute_loss()` and `aggregate_loss()` should be implemented. See
+    documentation in `compute_loss()` and `aggregate_loss()` for more details
+    regarding how `compute_*()` and `aggregate_*()` functions should be written.
 
     NOTE: When doing distributed evaluation, Pytorch Lightning may pad the
     batches to ensure that the batch size is consistent across devices. This can
@@ -23,7 +30,14 @@ class PLModelWrapper(pl.LightningModule):
     model.
     """
 
-    def __init__(self, model_dir, copy_to_cwd=False, **kwargs):
+    def __init__(
+        self,
+        model_dir,
+        values_to_compute=None,
+        reset_results_on_epoch_start=True,
+        copy_to_cwd=False,
+        **kwargs
+    ):
         """
         Arguments:
 
@@ -32,6 +46,16 @@ class PLModelWrapper(pl.LightningModule):
                 load the model. Will be passed to `PLModelWrapper.load_model` and
                 `PLModelWrapper.copy()`
 
+            values_to_compute (tuple, default=('loss',)):
+                A tuple of strings specifying which values should be computed
+                during test_step() and aggregated during test_epoch_end(). For
+                each `value` in `values_to_compute`, the class functions
+                `compute_{value}` and `aggregate_{value}` must be defined.
+
+            reset_results_on_epoch_start (bool, default=True):
+                If True, resets the contents of `self.results` at the beginning
+                of every test epoch.
+
             copy_to_cwd (bool):
                 If True, calls the `PLModelWrapper.copy()` function during
                 instantiation.
@@ -39,11 +63,32 @@ class PLModelWrapper(pl.LightningModule):
         """
         super().__init__()
 
+        # Load model
         self.model = None
         self.load_model(model_dir, **kwargs)
 
         if self.model is None:
             raise RuntimeError("Failed to load model. Make sure to implement `load_model()` and assign `self.model`")
+
+        if values_to_compute is None:
+            self.values_to_compute = ('loss',)
+        else:
+            self.values_to_compute = tuple(values_to_compute)
+
+        # Check compute/aggregate functions
+        for value in self.values_to_compute:
+            try:
+                getattr(self, f'compute_{value}')
+            except AttributeError:
+                raise RuntimeError(f"Failed to find function `compute_{value}`.  Make sure to define 'compute_<value>' and 'aggregate_<value> for each <value> specified in `values_to_compute`")
+
+            try:
+                getattr(self, f'aggregate_{value}')
+            except AttributeError:
+                raise RuntimeError(f"Failed to find function `compute_{value}`.  Make sure to define 'compute_<value>' and 'aggregate_<value> for each <value> specified in `values_to_compute`")
+
+        # Other administrative tasks
+        self.reset_results_on_epoch_start = reset_results_on_epoch_start
 
         if copy_to_cwd:
             self.copy(model_dir)
@@ -60,9 +105,17 @@ class PLModelWrapper(pl.LightningModule):
         raise NotImplementedError
 
 
-    def loss_fxn(self, batch):
+    def compute_loss(self, batch):
         """
-        A function for computing the energy and force MSE of the model.
+        A function for computing the energy and force MSE of the model. This
+        function will be called by default during `test_step()` unless
+        `self.values_to_compute` was specified to not contain "loss".
+
+        When implementing new `compute_*()` functions, make sure that they
+        return a dictionary that contains any keys that are necessary for the
+        corresponding `aggregate_*()` function. For example, the
+        `aggregate_loss()` function by default expects the following keys:
+        "energy", "force", "batch_size", and "natoms".
 
         Arguments:
 
@@ -85,6 +138,68 @@ class PLModelWrapper(pl.LightningModule):
         raise NotImplementedError
 
 
+    def aggregate_loss(self, step_outputs):
+        """
+        A function that takes a list of outputs from `test_step()`, aggregates
+        the results, and stores them under `self.results`.
+
+        When implementing other `aggregate_*()` functions, make sure to store
+        the results under `self.results` rather than returning the values. Also
+        note that you should likely call `self.all_gather` in order to collect
+        the results from all sub-processes.
+
+        Arguments:
+
+            step_outputs (list):
+                A list of outputs returned by `test_step()`.
+
+        Returns:
+
+            None. Results must be stored under `self.results`.
+        """
+
+        # compute_loss MUST return the MSE or MAE so weighted aggregation is correct
+        n_e_tot = sum([s['batch_size'] for s in step_outputs])
+        n_f_tot = sum([s['natoms'] for s in step_outputs])
+
+        e_rmse = np.sqrt(np.sum(([s['energy']*s['batch_size'] for s in step_outputs]))/n_e_tot)
+        f_rmse = np.sqrt(np.sum(([s['force']*s['natoms'] for s in step_outputs]))/n_f_tot)
+
+        e_rmse = np.average(self.all_gather(e_rmse).detach().cpu().numpy())
+        f_rmse = np.average(self.all_gather(f_rmse).detach().cpu().numpy())
+
+        self.results['e_rmse'] = e_rmse
+        self.results['f_rmse'] = f_rmse
+
+
+    def on_test_epoch_start(self):
+        if self.reset_results_on_epoch_start:
+            self.results = {}
+
+
+    def test_step(self, batch, batch_idx):
+        torch.set_grad_enabled(True)
+
+        results = {}
+        for value in self.values_to_compute:
+            fxn = getattr(self, f'compute_{value}')
+
+            for k,v in fxn(batch).items():
+                results[k] = v
+
+
+        for k,v in results.items():
+            if isinstance(v, torch.Tensor):
+                results[k] = v.detach().cpu()#.numpy()
+
+        return results
+
+    def test_epoch_end(self, step_outputs):
+        for value in self.values_to_compute:
+            aggregation_fxn = getattr(self, f'aggregate_{value}')
+            aggregation_fxn(step_outputs)
+
+
     def copy(self, model_path):
         """
         Copies all files necessary for model construction to the current
@@ -99,31 +214,3 @@ class PLModelWrapper(pl.LightningModule):
         """
         raise NotImplementedError
 
-
-    def test_step(self, batch, batch_idx):
-        torch.set_grad_enabled(True)
-
-        results = self.loss_fxn(batch)
-
-        # loss_fxn MUST return the MSE or MAE so weighted aggregation is correct
-        results['energy'] *= results['batch_size']
-        results['force']  *= results['natoms']
-
-        for k,v in results.items():
-            if isinstance(v, torch.Tensor):
-                results[k] = v.detach().cpu()#.numpy()
-
-        return results
-
-    def test_epoch_end(self, step_outputs):
-        n_e_tot = sum([s['batch_size'] for s in step_outputs])
-        n_f_tot = sum([s['natoms'] for s in step_outputs])
-
-        rmse_eng = np.sqrt(np.sum(([s['energy'] for s in step_outputs]))/n_e_tot)
-        rmse_fcs = np.sqrt(np.sum(([s['force'] for s in step_outputs]))/n_f_tot)
-
-        rmse_eng = np.average(self.all_gather(rmse_eng).detach().cpu().numpy())
-        rmse_fcs = np.average(self.all_gather(rmse_fcs).detach().cpu().numpy())
-
-        self.rmse_eng = rmse_eng
-        self.rmse_fcs = rmse_fcs

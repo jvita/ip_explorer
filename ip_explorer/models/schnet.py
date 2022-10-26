@@ -11,8 +11,8 @@ class SchNetModelWrapper(PLModelWrapper):
     A wrapper for a SchNet model. Assumes that `model_path` contains a model
     checkpoint file with the name 'best_model'
     """
-    def __init__(self, model_path, copy_to_cwd=False, **kwargs):
-        super().__init__(model_dir=model_path, copy_to_cwd=copy_to_cwd)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
 
     def load_model(self, model_path, **kwargs):
@@ -22,7 +22,7 @@ class SchNetModelWrapper(PLModelWrapper):
         )
 
 
-    def loss_fxn(self, batch):
+    def compute_loss(self, batch):
         true_eng = batch['energy']/batch['_n_atoms']
         true_fcs = batch['forces']
 

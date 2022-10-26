@@ -26,8 +26,8 @@ class NequIPModelWrapper(PLModelWrapper):
         ```
 
     """
-    def __init__(self, traindir, copy_to_cwd=False):
-        super().__init__(model_dir=traindir, copy_to_cwd=copy_to_cwd)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
 
     def load_model(self, traindir):
@@ -47,7 +47,7 @@ class NequIPModelWrapper(PLModelWrapper):
         self.metrics = metrics
 
 
-    def loss_fxn(self, batch):
+    def compute_loss(self, batch):
         self.metrics.reset()
 
         batch_dict = AtomicData.to_AtomicDataDict(batch)

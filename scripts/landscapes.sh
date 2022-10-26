@@ -27,19 +27,18 @@ jsrun -n 1 python3 -m ip_explorer.landscapes \
     --num-nodes 1 \
     --gpus-per-node 4 \
     --batch-size 32 \
-    --cutoff 7.0 \
     --loss-type 'both' \
     --distance 0.5 \
-    --steps 41 \
-    --model-type "schnet" \
-    --database-path "/g/g20/vita1/ws/projects/data/AL_Al/" \
-    --model-path '/g/g20/vita1/ws/logs/runs/painn/4114101-painn_initial-cutoff=7.0-n_atom_basis=30-n_interactions=3-n_rbf=20-n_layers=2-n_hidden=None-Ew=0.01-Fw=0.99-lr=0.005-epochs=5000/' \
-    --save-dir "/g/g20/vita1/ws/logs/ip_explorer/schnet/painn" \
-    --additional-kwargs "cutoff:7.0" \
-    # --model-type "nequip" \
-    # --model-path "/g/g20/vita1/ws/projects/nequip/results/AL_Al/debug/" \
-    # --database-path "/g/g20/vita1/ws/projects/nequip/results/AL_Al/debug/" \
-    # --save-dir "/g/g20/vita1/ws/logs/ip_explorer/nequip/debug" \
+    --steps 5 \
+    --model-type "nequip" \
+    --model-path "/g/g20/vita1/ws/projects/nequip/results/AL_Al/debug/" \
+    --database-path "/g/g20/vita1/ws/projects/nequip/results/AL_Al/debug/" \
+    --save-dir "/g/g20/vita1/ws/logs/ip_explorer/nequip/debug" \
+    # --model-type "schnet" \
+    # --database-path "/g/g20/vita1/ws/projects/data/AL_Al/" \
+    # --model-path '/g/g20/vita1/ws/logs/runs/painn/4114101-painn_initial-cutoff=7.0-n_atom_basis=30-n_interactions=3-n_rbf=20-n_layers=2-n_hidden=None-Ew=0.01-Fw=0.99-lr=0.005-epochs=5000/' \
+    # --save-dir "/g/g20/vita1/ws/logs/ip_explorer/schnet/painn" \
+    # --additional-kwargs "cutoff:7.0" \
     # --prefix '4gpus_'
     # --no-compute-initial-losses
     # --overwrite \

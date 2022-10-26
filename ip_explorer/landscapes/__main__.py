@@ -10,12 +10,8 @@ import torch
 import torchmetrics
 
 import os
-import logging
 import argparse
 import numpy as np
-
-# from ase import Atoms
-# from ase.io import read, write
 
 import pytorch_lightning as pl
 
@@ -26,6 +22,9 @@ from loss_landscapes.model_interface.model_wrapper import SimpleModelWrapper
 from ip_explorer.datamodules import get_datamodule_wrapper
 from ip_explorer.models import get_model_wrapper
 from ip_explorer.landscapes.loss import EnergyForceLoss
+
+import logging
+logging.getLogger("pytorch_lightning").setLevel(logging.WARNING)
 
 parser = argparse.ArgumentParser(
     description="Generate loss landscapes"
@@ -53,7 +52,6 @@ parser.set_defaults(compute_initial_losses=True)
 parser.add_argument( '--batch-size', type=int, help='Batch size for data loaders', dest='batch_size', default=128, required=False,)
 
 parser.add_argument( '--loss-type', type=str, help='"energy", "force" or None', dest='loss_type', default=None, required=False,) 
-parser.add_argument( '--cutoff', type=float, help='Pair distance cutoff. Only needed for SchNet', dest='cutoff', required=True)
 parser.add_argument( '--distance', type=float, help='Fractional distance in parameterspace', dest='distance', required=True,) 
 parser.add_argument( '--steps', type=int, help='Number of grid steps in each direction in parameter space', dest='steps', required=True,) 
 
@@ -97,7 +95,7 @@ def main():
         **additional_kwargs,
     )
     model = get_model_wrapper(args.model_type)(
-        args.model_path,
+        model_dir=args.model_path,
         copy_to_cwd=True,
         **additional_kwargs,
     )
@@ -119,13 +117,13 @@ def main():
 
         print('Computing training errors with devices=1 to avoid batch padding errors', flush=True)
         trainer.test(model, dataloaders=datamodule.train_dataloader())
-        train_eloss, train_floss = model.rmse_eng, model.rmse_fcs
+        train_eloss, train_floss = model.results['e_rmse'], model.results['f_rmse']
         print('Computing validation errors with devices=1 to avoid batch padding errors', flush=True)
         trainer.test(model, dataloaders=datamodule.val_dataloader())
-        val_eloss, val_floss = model.rmse_eng, model.rmse_fcs
+        val_eloss, val_floss = model.results['e_rmse'], model.results['f_rmse']
         print('Computing testing errors with devices=1 to avoid batch padding errors', flush=True)
         trainer.test(model, dataloaders=datamodule.test_dataloader())
-        test_eloss, test_floss = model.rmse_eng, model.rmse_fcs
+        test_eloss, test_floss = model.results['e_rmse'], model.results['f_rmse']
 
         print('E_RMSE (eV/atom), F_RMSE (eV/Ang)')
         print(f'\tTrain:\t{train_eloss}, \t{train_floss}')
@@ -154,13 +152,9 @@ def main():
         enable_progress_bar=False,
     )
 
-    model._val_dataloader = datamodule.val_dataloader()
-
     metric = EnergyForceLoss(
         evaluation_fxn = trainer.test,
         data_loader=datamodule.train_dataloader()
-        # data_loader=datamodule
-        # data_loader=None,
     )
 
     model_final = SimpleModelWrapper(model)  # needed for loss_landscapes
