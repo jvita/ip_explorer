@@ -12,6 +12,7 @@ import torchmetrics
 import os
 import argparse
 import numpy as np
+import matplotlib.pyplot as plt
 
 import pytorch_lightning as pl
 
@@ -176,6 +177,107 @@ def main():
     save_name = 'L={}_d={:.2f}_s={}'.format('forces', args.distance, args.steps)
     full_path = os.path.join(args.save_dir, args.prefix+save_name)
     np.save(full_path, loss_data_fin[1])
+
+    # Generate figures
+    fig = plt.figure(figsize=(12, 4))
+
+    # Energy loss only
+    ax = fig.add_subplot(1, 3, 1, projection='3d')
+    ax.dist = 13
+
+    X = np.array([[j for j in range(eng_loss.shape[0])] for i in range(eng_loss.shape[1])])
+    Y = np.array([[i for _ in range(eng_loss.shape[0])] for i in range(eng_loss.shape[1])])
+
+    ax.plot_surface(X, Y, eng_loss, rstride=1, cstride=1, cmap='viridis', edgecolor='none')
+
+    ax.set_xticks(ticks)
+    ax.set_yticks(ticks)
+    ax.set_xticklabels(ticklabels)
+    ax.set_yticklabels(ticklabels)
+    ax.set_title(e_title, pad=10)
+    ax.set_xlabel(r"Normalized $d_1$", fontsize=12, labelpad=10)
+    ax.set_ylabel(r"Normalized $d_2$", fontsize=12, labelpad=10)
+
+    # Forces loss only
+    ax = fig.add_subplot(1, 3, 2, projection='3d')
+    ax.dist = 13
+
+    ax.plot_surface(X, Y, fcs_loss, rstride=1, cstride=1, cmap='viridis', edgecolor='none')
+
+    ax.set_xticks(ticks)
+    ax.set_yticks(ticks)
+    ax.set_xticklabels(ticklabels)
+    ax.set_yticklabels(ticklabels)
+    ax.set_title(f_title, pad=10)
+    ax.set_xlabel(r"Normalized $d_1$", fontsize=12, labelpad=10)
+    ax.set_ylabel(r"Normalized $d_2$", fontsize=12, labelpad=10)
+
+    # Combined
+    ax = fig.add_subplot(1, 3, 3, projection='3d')
+    ax.dist = 13
+
+    ax.plot_surface(X, Y, total, rstride=1, cstride=1, cmap='viridis', edgecolor='none')
+
+    ax.set_xticks(ticks)
+    ax.set_yticks(ticks)
+    ax.set_xticklabels(ticklabels)
+    ax.set_yticklabels(ticklabels)
+    ax.set_title(l_title, pad=10)
+    ax.set_xlabel(r"Normalized $d_1$", fontsize=12, labelpad=10)
+    ax.set_ylabel(r"Normalized $d_2$", fontsize=12, labelpad=10)
+
+    _ = plt.tight_layout()
+
+    save_name = 'L={}_d={:.2f}_s={}-3d.png'.format('forces', args.distance, args.steps)
+    full_path = os.path.join(args.save_dir, args.prefix+save_name)
+    plt.savefig(full_path)
+
+    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+
+    # Energy loss only
+    ax = axes[0]
+    c = ax.imshow(eng_loss)
+    cbar = fig.colorbar(c, ax=ax, fraction=0.045)
+
+    ax.set_xticks(ticks)
+    ax.set_yticks(ticks)
+    ax.set_xticklabels(ticklabels)
+    ax.set_yticklabels(ticklabels)
+    ax.set_title(e_title, pad=10)
+    ax.set_aspect('equal')
+
+    # Forces loss only
+    ax = axes[1]
+    c = ax.imshow(fcs_loss)
+    cbar = fig.colorbar(c, ax=ax, fraction=0.045)
+
+    ax.set_xticks(ticks)
+    ax.set_yticks(ticks)
+    ax.set_xticklabels(ticklabels)
+    ax.set_yticklabels(ticklabels)
+    ax.set_title(f_title, pad=10)
+    ax.set_aspect('equal')
+
+    # Combined
+    ax = axes[2]
+    c = ax.imshow(total)
+    cbar = fig.colorbar(c, ax=ax, fraction=0.045)
+
+    ax.set_xticks(ticks)
+    ax.set_yticks(ticks)
+    ax.set_xticklabels(ticklabels)
+    ax.set_yticklabels(ticklabels)
+    ax.set_title(l_title, pad=10)
+    ax.set_aspect('equal')
+
+    fig.text(0.5, 0.0, r'Normalized $d_1$', ha='center', fontsize=12)
+    fig.text(0.0, 0.5, r'Normalized $d_2$', va='center', rotation='vertical', fontsize=12)
+
+    _ = plt.tight_layout()
+
+    save_name = 'L={}_d={:.2f}_s={}-2d.png'.format('forces', args.distance, args.steps)
+    full_path = os.path.join(args.save_dir, args.prefix+save_name)
+    plt.savefig(full_path)
 
     print('Done generating loss landscape!')
 

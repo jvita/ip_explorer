@@ -6,6 +6,7 @@ import shutil
 
 from nequip.data import AtomicData, AtomicDataDict
 from nequip.train import Trainer, Metrics
+from nequip.model import model_from_config
 from nequip.utils import Config, instantiate
 
 
@@ -37,16 +38,22 @@ class NequIPModelWrapper(PLModelWrapper):
 
     def load_model(self, traindir):
 
-        self.model, _ = Trainer.load_model_from_training_session(traindir=traindir)
-        metrics_config = Config.from_file(
+        config = Config.from_file(
             os.path.join(traindir, 'config.yaml'),
         )
-        metrics_components = metrics_config.get("metrics_components", None)
+
+        # self.model, _ = Trainer.load_model_from_training_session(traindir=traindir)
+        self.model = model_from_config(config, initialize=False)
+
+        if 'structure_representations' in self.values_to_compute:
+            self._register_representations_hook()
+
+        metrics_components = config.get("metrics_components", None)
         metrics, _ = instantiate(
             builder=Metrics,
             prefix="metrics",
             positional_args=dict(components=metrics_components),
-            all_args=metrics_config,
+            all_args=config,
         )
 
         self.metrics = metrics
@@ -73,9 +80,21 @@ class NequIPModelWrapper(PLModelWrapper):
         return {
             'energy': results['e/N_rmse']**2,  # mse isn't implemented yet in nequip
             'force':  results['f_rmse']**2,
-            'batch_size': max(batch_dict[AtomicDataDict.BATCH_KEY])+1,
+            'batch_size': int(max(batch_dict[AtomicDataDict.BATCH_KEY])+1),
             'natoms': batch_dict[AtomicDataDict.FORCE_KEY].shape[0],
         }
+
+
+    def _register_representations_hook(self):
+        """Add hook for extracting the output of the final convolution layer"""
+        def hook(model, inputs):
+            inputs[0]['node_representations'] = inputs[0][AtomicDataDict.NODE_FEATURES_KEY]
+            inputs[0]['edge_representations'] = inputs[0][AtomicDataDict.EDGE_EMBEDDING_KEY]
+
+        for name, module in self.model.named_modules():
+            # if name.split('.')[-1] == 'conv_to_output_hidden':
+            if name.split('.')[-1] == 'output_hidden_to_scalar':
+                module.register_forward_pre_hook(hook)
 
 
     def compute_structure_representations(self, batch):
@@ -84,18 +103,21 @@ class NequIPModelWrapper(PLModelWrapper):
         out = self.model.forward(batch_dict)
 
         with torch.no_grad():
-            z = out[AtomicDataDict.NODE_FEATURES_KEY]
+            # z = out[AtomicDataDict.NODE_FEATURES_KEY]
+            z = out['node_representations']
             per_atom_representations = z.new_zeros(z.shape)
 
             if self.representation_type in ['node', 'both']:
                 per_atom_representations += z
 
             if self.representation_type in ['edge', 'both']:
-                idx_i = out[AtomicDataDict.EDGE_INDEX_KEY][:, 0]
-                idx_j = out[AtomicDataDict.EDGE_INDEX_KEY][:, 1]
+                raise NotImplementedError("Still trying to figure out how to use the edge representations properly")
 
-                per_atom_representations.index_add_(0, idx_i, out[AtomicDataDict.EDGE_EMBEDDING_KEY])
-                per_atom_representations.index_add_(0, idx_j, out[AtomicDataDict.EDGE_EMBEDDING_KEY])
+                idx_i = out[AtomicDataDict.EDGE_INDEX_KEY][0, :]
+                idx_j = out[AtomicDataDict.EDGE_INDEX_KEY][1, :]
+
+                per_atom_representations.index_add_(0, idx_i, out['edge_representations'])
+                per_atom_representations.index_add_(0, idx_j, out['edge_representations'])
 
         splits = torch.unique(out['batch'], return_counts=True)[1]
         splits = splits.detach().cpu().numpy().tolist()
@@ -103,7 +125,8 @@ class NequIPModelWrapper(PLModelWrapper):
         return {
             'representations': per_atom_representations,
             'representations_splits': splits,
-            'representations_energy': batch_dict[AtomicDataDict.TOTAL_ENERGY_KEY],
+            # 'representations_energy': batch_dict[AtomicDataDict.TOTAL_ENERGY_KEY],
+            'representations_energy': out[AtomicDataDict.TOTAL_ENERGY_KEY],
         }
 
 

@@ -41,7 +41,6 @@ class SchNetDataModule(PLDataModuleWrapper):
             load_properties=['energy', 'forces'],
             batch_size=self.batch_size,
             num_workers=self.num_workers,
-            shuffle_train=False,
             transforms=[
                 tform.RemoveOffsets('energy', remove_mean=True, remove_atomrefs=False),
                 tform.MatScipyNeighborList(cutoff=self.cutoff),

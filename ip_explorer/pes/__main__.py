@@ -1,150 +1,111 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# Imports
-
-import random
-import numpy as np
-
-import torch
-import torchmetrics
-
 import os
 import argparse
 import numpy as np
+import matplotlib
+matplotlib.use("pdf")
+import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 
-from ase import Atoms
-from ase.io import write
-
-import pytorch_lightning as pl
-
-import loss_landscapes
-import loss_landscapes.metrics
-from loss_landscapes.model_interface.model_wrapper import SimpleModelWrapper
-
-from ip_explorer.datamodules import get_datamodule_wrapper
-from ip_explorer.models import get_model_wrapper
-
-import logging
-# logging.getLogger("pytorch_lightning").setLevel(logging.WARNING)
 
 parser = argparse.ArgumentParser(
-    description="Generate PES"
+    description="Generate potential energy surface"
 )
 
-# Add CLI arguments
-parser.add_argument( '--seed', type=int, help='The random seed to use', dest='seed', default=None, required=False,)
-parser.add_argument( '--num-nodes', type=int, help='The number of nodes available for training', dest='num_nodes', required=True,) 
-parser.add_argument( '--gpus-per-node', type=int, help='The number of GPUs per node to use', dest='gpus_per_node', default=1, required=False,) 
-
 parser.add_argument( '--prefix', type=str, help='Prefix to add to the beginning of logged files', dest='prefix', default='', required=False)
-parser.add_argument( '--save-dir', type=str, help='Directory in which to save the results. Created if does not exist', dest='save_dir', required=True)
-parser.add_argument( '--overwrite', help='Allows save_directory to be overwritten', action='store_true')
-parser.add_argument( '--no-ovewrite', action='store_false', dest='overwrite')
-parser.set_defaults(overwrite=False)
-
-parser.add_argument( '--model-type', type=str, help='Type of model being used.  Must be one of the supported types from ip_explorer', dest='model_type', required=True)
-parser.add_argument( '--database-path', type=str, help='Path to formatted schnetpack.data.ASEAtomsData database', dest='database_path', required=True)
-parser.add_argument( '--model-path', type=str, help='Full path to model checkpoint file', dest='model_path', required=True,) 
-
-parser.add_argument( '--compute-initial-losses', help='Computes and logs the train/test/val losses of the inital model', action='store_true')
-parser.add_argument( '--no-compute-initial-losses', action='store_false', dest='compute_initial_losses')
-parser.set_defaults(compute_initial_losses=True)
-
-parser.add_argument( '--batch-size', type=int, help='Batch size for data loaders', dest='batch_size', default=128, required=False,)
-parser.add_argument( '--slice', type=int, help='Step size to use when reducing data size via slicing', default=1, dest='slice', required=False,)
-
-parser.add_argument( '--additional-kwargs', type=str, help='A string of additional key-value argument pairs that will be passed to the model and datamodule wrappers. Format: "key1:value1 key2:value2"', dest='additional_kwargs', required=False, default='') 
+parser.add_argument( '--load-dir', type=str, help='Directory from which to load the data', dest='load_dir', required=True)
+parser.add_argument( '--n-components', type=int, help='Number of dimensions for SHEAP plot. Must be 2 or 3', dest='n_components', choices=[2,3], default=2)
+parser.add_argument( '--scale', type=float, help='Scaling factor for SHEAP volumes', dest='scale', default=1)
 
 args = parser.parse_args()
 
-print('ALL ARGUMENTS:')
-print(args)
-
-# Seed RNGs
-if args.seed is None:
-    args.seed = np.random.randint()
-
-torch.manual_seed(args.seed)
-torch.cuda.manual_seed(args.seed)
-torch.cuda.manual_seed_all(args.seed)
-np.random.seed(args.seed)
-random.seed(args.seed)
-torch.backends.cudnn.benchmark = False
-torch.backends.cudnn.deterministic = True
-
-
 def main():
 
-    if 'SHEAP_PATH' not in os.environ:
-        print("'SHEAP_PATH' environment variable not found. Will only perform pre-processing steps")
+    input_fname = os.path.join(args.load_dir, args.prefix+f'sheap-{args.n_components}d.xyz')
 
-    # Setup
-    if not os.path.isdir(args.save_dir):
-        os.makedirs(args.save_dir)
+    print("Loading data from:", input_fname)
 
-    os.chdir(args.save_dir)
-    print("Saving results in:", args.save_dir)
+    if args.n_components == 2:
+        data = np.loadtxt(input_fname, skiprows=2, usecols=(1, 2, 10, 8))  # x, y, size, color
 
-    additional_kwargs = {}
-    for kv_pair in args.additional_kwargs.split():
-        k, v = kv_pair.split(':')
-        additional_kwargs[k] = v
+        fig, ax = plt.subplots(figsize=(16, 8))
 
-    datamodule = get_datamodule_wrapper(args.model_type)(
-        args.database_path,
-        batch_size=args.batch_size,
-        num_workers=int(np.floor(int(os.environ['LSB_MAX_NUM_PROCESSORS'])/int(os.environ['GPUS_PER_NODE']))),
-        **additional_kwargs,
-    )
-    model = get_model_wrapper(args.model_type)(
-        model_dir=args.model_path,
-        values_to_compute=('structure_representations',),
-        copy_to_cwd=True,
-        **additional_kwargs,
-    )
+        ax.set_title('SHEAP')
 
-    model.eval()
+        tmp = data.copy()
 
-    trainer = pl.Trainer(
-        num_nodes=args.num_nodes,
-        devices=args.gpus_per_node,
-        accelerator='cuda',
-        strategy='ddp',
-        # enable_progress_bar=False,
-    )
+        x = tmp[:, 0]
+        y = tmp[:, 1]
+        s = tmp[:, 2]
+        c = tmp[:, 3]
 
-    trainer.test(model, dataloaders=datamodule.train_dataloader())
+        mnx = 1.1*np.min(x)
+        mxx = 1.1*np.max(x)
 
-    representations = model.results['representations'].detach().cpu().numpy()
-    representations_energies = model.results['representations_energies'].detach().cpu().numpy()
+        mny = 1.1*np.min(y)
+        mxy = 1.1*np.max(y)
 
-    images = []
-    for i, (v, e) in enumerate(zip(representations, representations_energies)):
-        atoms  =  Atoms('H', positions=[[0,0,0]])
+        ax.set_aspect('equal')
 
-        # SHEAP searches for "energy"
-        atoms.info['energy'] = e
+        ax.set_xlim([mnx, mxx])
+        ax.set_ylim([mny, mxy])
 
-        # SHEAP searches for "SOAP*" keys
-        atoms.info['SOAP-n8-l4-c2.4-g0.3'] = v
+        bbox = ax.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
+        w, h = bbox.width, bbox.height
 
-        # Filler information for SHEAP testing
-        atoms.info['name'] = str(i)
-        atoms.info['pressure']    = 0.0
-        atoms.info['spacegroup']  = 'unknown'
-        atoms.info['times_found'] = 1
+        pix_per_plot_unit = w*fig.dpi/abs(mxx-mnx)
 
-        images.append(atoms)
+        s *= pix_per_plot_unit
+        s  = np.pi*(s**2)
+        s *= args.scale
 
-    write(os.path.join(args.save_dir, 'unprocessed.xyz'), images, format='extxyz')
+        sc = ax.scatter(x, y, s=s, c=c)
 
-    if 'SHEAP_PATH' not in os.environ:
-        return
+        cbar = fig.colorbar(sc, fraction=0.018)
+        cbar.set_label(r'$E_{DFT}$', rotation=0, fontsize=14, labelpad=20)
+
+        plt.savefig(
+            os.path.join(args.load_dir, args.prefix+'sheap-2d.png'),
+            bbox_inches='tight'
+        )
     else:
-        raise RuntimeError("SHEAP execution not supported yet. Perform SHEAP processing externally.")
+        data = np.loadtxt(input_fname, skiprows=2, usecols=(1, 2, 3, 11, 9)) # x, y, z, size, color
+
+        x = data[:, 0].copy()
+        y = data[:, 1].copy()
+        z = data[:, 2].copy()
+        s = data[:, 3].copy()
+        c = data[:, 4].copy()
+
+        s *= args.scale
+
+        fig = go.Figure(data=[go.Scatter3d(
+            x=x,
+            y=y,
+            z=z,
+            mode='markers',
+            marker=dict(
+                size=s,
+                sizemode='diameter',
+                color=c,                # set color to an array/list of desired values
+                colorscale='Viridis',   # choose a colorscale
+                opacity=1.0,
+                colorbar=dict(
+                    title="Colorbar"
+                ),
+                line=dict(
+                    width=1,
+                )
+            ),
+        )])
+
+        # tight layout
+        fig.update_layout(
+            margin=dict(l=0, r=0, b=0, t=0),
+            scene=dict(aspectmode='data')
+        )
+
+        fig.write_image(os.path.join(args.load_dir, args.prefix+'sheap-3d.png'))
 
 
 if __name__ == '__main__':
-    os.environ['GPUS_PER_NODE'] = str(args.gpus_per_node)
     main()

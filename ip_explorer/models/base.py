@@ -63,13 +63,6 @@ class PLModelWrapper(pl.LightningModule):
         """
         super().__init__()
 
-        # Load model
-        self.model = None
-        self.load_model(model_dir)
-
-        if self.model is None:
-            raise RuntimeError("Failed to load model. Make sure to implement `load_model()` and assign `self.model`")
-
         if values_to_compute is None:
             self.values_to_compute = ('loss',)
         else:
@@ -94,6 +87,14 @@ class PLModelWrapper(pl.LightningModule):
             self.copy(model_dir)
 
         self.model_dir = model_dir
+
+        # Load model at the end
+        self.model = None
+        self.load_model(model_dir)
+
+        if self.model is None:
+            raise RuntimeError("Failed to load model. Make sure to implement `load_model()` and assign `self.model`")
+
 
 
     def load_model(self, model_dir):
@@ -178,7 +179,8 @@ class PLModelWrapper(pl.LightningModule):
 
     def aggregate_structure_representations(self, step_outputs):
         # On each worker, compute the per-structure average representations
-        per_struct_representations = []
+        per_struct_representations  = []
+        per_struct_energies         = []
         for s in step_outputs:
             per_struct_representations += [
                 torch.mean(split, dim=0)
@@ -188,11 +190,10 @@ class PLModelWrapper(pl.LightningModule):
                 )
             ]
 
-        per_struct_representations = torch.vstack(per_struct_representations)
+            per_struct_energies.append(s['representations_energy'])
 
-        per_struct_energies = torch.cat([
-            s['representations_energy'] for s in step_outputs
-        ])
+        per_struct_representations = torch.vstack(per_struct_representations)
+        per_struct_energies        = torch.cat(per_struct_energies)
 
         # Now gather everything
         per_struct_representations = self.all_gather(per_struct_representations)
