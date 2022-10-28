@@ -125,8 +125,7 @@ class NequIPModelWrapper(PLModelWrapper):
         return {
             'representations': per_atom_representations,
             'representations_splits': splits,
-            # 'representations_energy': batch_dict[AtomicDataDict.TOTAL_ENERGY_KEY],
-            'representations_energy': out[AtomicDataDict.TOTAL_ENERGY_KEY],
+            'representations_energy': batch_dict[AtomicDataDict.TOTAL_ENERGY_KEY],
         }
 
 

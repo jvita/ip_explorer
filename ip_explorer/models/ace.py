@@ -5,67 +5,42 @@ import shutil
 import torch
 import numpy as np
 
-import tensorflow as tf
-from tensorpotential.potential.ace import ACE
-
-
-class ACETorchWrapper(ACE):
-    """
-    This class wraps a TensorPotential implementation of ACE using
-    setters/getters on specific class attributes so that underlying Tensorflow
-    Variables are exposed as PyTorch Parameters.
-    """
-    def __init__(self, tflow_model):
-        self._tflow_model = tflow_model
-
-        # self._fit_coefs = torch.nn.Parameter(self._tflow_model.fit_coefs.numpy(), requires_grad=True)
-
-        self._basis_coefs = torch.nn.Parameter(self._tflow_model.fit_coefs[self.total_num_crad:]
-
-    def set_coefs(self, coefs):
-        self.fit_coefs.assign(tf.Variable(coefs, dtype=tf.float64))
-
-    def get_coefs(self):
-        return self.fit_coefs
-
-    # @parameter
-    # def fit_coefs(self):
-    #     return self._fit_coefs
-
-    # @fit_coefs.setter
-    # def fit_coefs(self, fit_coefs):
-    #     self._fit_coefs = fit_coefs
-    #     self._tflow_model.fit_coefs = tf.Variable(fit_coefs.detach().cpu().numpy(), dtype=tf.float64, name='adjustable_coefs')
+from pyace.basis import BBasisConfiguration
+from tensorpotential.potentials.ace import ACE
+from tensorpotential.tensorpot import TensorPotential
 
 class ACEModelWrapper(PLModelWrapper):
     """
-    A wrapper for an ACE model. This wrapper is
+    A wrapper for an ACE model.
     """
     def __init__(self, model_dir, **kwargs):
-        if 'representation_type' in kwargs:
-            self.representation_type = kwargs['representation_type']
-        else:
-            self.representation_type = 'node'
+        # if 'representation_type' in kwargs:
+        #     self.representation_type = kwargs['representation_type']
+        # else:
+        #     self.representation_type = 'node'
 
 
         super().__init__(model_dir=model_dir, **kwargs)
 
 
     def load_model(self, model_path):
-        self.model = torch.load(
-            os.path.join(model_path, 'best_model'),
-            map_location=torch.device('cpu')
+        basis = BBasisConfiguration(os.path.join(model_path, 'interim_potential_0.yaml'))
+        self.model = ACETorchWrapper(
+            TensorPotential(ACE(basis))
         )
 
 
     def compute_loss(self, batch):
-        true_eng = batch['energy']/batch['_n_atoms']
+
+        natoms = torch.unique(torch.from_numpy(batch['cell_map']), return_counts=True)[1]
+
+        true_eng = batch['energy']/natoms
         true_fcs = batch['forces']
 
-        results = self.model.forward(batch)
+        loss, grad_loss, pred_eng, pred_fcs = self.model._tflow_model.native_fit(batch)
 
-        pred_eng = results['energy']/batch['_n_atoms']
-        pred_fcs = results['forces']
+        pred_eng = torch.from_numpy(pred_eng.numpy())/natoms
+        pred_fcs = torch.from_numpy(pred_fcs.numpy())
 
         ediff = (pred_eng - true_eng).detach().cpu().numpy()
         fdiff = (pred_fcs - true_fcs).detach().cpu().numpy()
@@ -74,7 +49,7 @@ class ACEModelWrapper(PLModelWrapper):
             'energy': np.mean(ediff**2),
             'force':  np.mean(fdiff**2),
             'batch_size': batch['energy'].shape[0],
-            'natoms': sum(batch['_n_atoms']).detach().cpu().numpy(),
+            'natoms': sum(natoms).detach().cpu().numpy(),
         }
 
 
@@ -117,8 +92,36 @@ class ACEModelWrapper(PLModelWrapper):
 
     def copy(self, model_path):
         shutil.copyfile(
-            os.path.join(model_path, 'best_model'),
-            os.path.join(os.getcwd(), 'best_model'),
+            os.path.join(model_path, 'interim_potential_0.yaml'),
+            os.path.join(os.getcwd(), 'interim_potential_0.yaml'),
         )
 
 
+# class ACETorchWrapper(ACE):
+class ACETorchWrapper(torch.nn.Module):
+    """
+    This class wraps a TensorPotential implementation of ACE using
+    setters/getters on specific class attributes so that underlying Tensorflow
+    Variables are exposed as PyTorch Parameters.
+    """
+    def __init__(self, tflow_model):
+        super().__init__()
+
+        self._tflow_model = tflow_model
+
+        self._radial_coefs  = torch.nn.Parameter( torch.from_numpy(self._tflow_model.potential.fit_coefs[:self._tflow_model.potential.total_num_crad].numpy()))
+        self._basis_coefs   = torch.nn.Parameter(torch.from_numpy(self._tflow_model.potential.fit_coefs[self._tflow_model.potential.total_num_crad:].numpy()))
+
+    @property
+    def radial_coefs(self):
+        return self._radial_coefs
+
+    @radial_coefs.setter
+    def radial_coefs(self, coefs):
+        self._radial_coefs.copy_(coefs)
+        self._tflow_model.potential.set_coefs(
+            np.concatenate([
+                self._radial_coefs.numpy(),
+                self._basis_coefs.numpy(),
+            ])
+        )

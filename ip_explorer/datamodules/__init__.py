@@ -1,11 +1,13 @@
 from .schnet import SchNetDataModule
 from .nequip import NequIPDataModule
+from .ace import ACEDataModule
 
 
 implemented_datamodules = {
-    'schnet': SchNetDataModule,
-    'painn':  SchNetDataModule,
-    'nequip': NequIPDataModule,
+    'schnet':   SchNetDataModule,
+    'painn':    SchNetDataModule,
+    'nequip':   NequIPDataModule,
+    'ace':      ACEDataModule
 }
 
 def get_datamodule_wrapper(datamodule_type):

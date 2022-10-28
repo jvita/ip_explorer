@@ -1,10 +1,12 @@
 from .schnet import SchNetModelWrapper
 from .nequip import NequIPModelWrapper
+from .ace import ACEModelWrapper
 
 implemented_wrappers = {
-    'schnet': SchNetModelWrapper,
-    'painn':  SchNetModelWrapper,
-    'nequip': NequIPModelWrapper,
+    'schnet':   SchNetModelWrapper,
+    'painn':    SchNetModelWrapper,
+    'nequip':   NequIPModelWrapper,
+    'ace':      ACEModelWrapper,
 }
 
 def get_model_wrapper(model_type):

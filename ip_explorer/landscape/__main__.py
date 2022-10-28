@@ -166,7 +166,7 @@ def main():
         distance=args.distance,     # maximum distance in parameter space
         steps=args.steps,           # number of steps
         normalization='filter',
-        deepcopy_model=True,
+        deepcopy_model=False,
         n_loss_terms=2,
     )
 
@@ -177,6 +177,9 @@ def main():
     save_name = 'L={}_d={:.2f}_s={}'.format('forces', args.distance, args.steps)
     full_path = os.path.join(args.save_dir, args.prefix+save_name)
     np.save(full_path, loss_data_fin[1])
+
+    eng_loss = loss_data_fin[0]
+    fcs_loss = loss_data_fin[1]
 
     # Generate figures
     fig = plt.figure(figsize=(12, 4))
