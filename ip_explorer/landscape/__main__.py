@@ -10,12 +10,9 @@ import torch
 import torchmetrics
 
 import os
-import logging
 import argparse
 import numpy as np
-
-# from ase import Atoms
-# from ase.io import read, write
+import matplotlib.pyplot as plt
 
 import pytorch_lightning as pl
 
@@ -25,7 +22,10 @@ from loss_landscapes.model_interface.model_wrapper import SimpleModelWrapper
 
 from ip_explorer.datamodules import get_datamodule_wrapper
 from ip_explorer.models import get_model_wrapper
-from ip_explorer.landscapes.loss import EnergyForceLoss
+from ip_explorer.landscape.loss import EnergyForceLoss
+
+import logging
+logging.getLogger("pytorch_lightning").setLevel(logging.WARNING)
 
 parser = argparse.ArgumentParser(
     description="Generate loss landscapes"
@@ -53,7 +53,6 @@ parser.set_defaults(compute_initial_losses=True)
 parser.add_argument( '--batch-size', type=int, help='Batch size for data loaders', dest='batch_size', default=128, required=False,)
 
 parser.add_argument( '--loss-type', type=str, help='"energy", "force" or None', dest='loss_type', default=None, required=False,) 
-parser.add_argument( '--cutoff', type=float, help='Pair distance cutoff. Only needed for SchNet', dest='cutoff', required=True)
 parser.add_argument( '--distance', type=float, help='Fractional distance in parameterspace', dest='distance', required=True,) 
 parser.add_argument( '--steps', type=int, help='Number of grid steps in each direction in parameter space', dest='steps', required=True,) 
 
@@ -97,7 +96,7 @@ def main():
         **additional_kwargs,
     )
     model = get_model_wrapper(args.model_type)(
-        args.model_path,
+        model_dir=args.model_path,
         copy_to_cwd=True,
         **additional_kwargs,
     )
@@ -119,13 +118,13 @@ def main():
 
         print('Computing training errors with devices=1 to avoid batch padding errors', flush=True)
         trainer.test(model, dataloaders=datamodule.train_dataloader())
-        train_eloss, train_floss = model.rmse_eng, model.rmse_fcs
+        train_eloss, train_floss = model.results['e_rmse'], model.results['f_rmse']
         print('Computing validation errors with devices=1 to avoid batch padding errors', flush=True)
         trainer.test(model, dataloaders=datamodule.val_dataloader())
-        val_eloss, val_floss = model.rmse_eng, model.rmse_fcs
+        val_eloss, val_floss = model.results['e_rmse'], model.results['f_rmse']
         print('Computing testing errors with devices=1 to avoid batch padding errors', flush=True)
         trainer.test(model, dataloaders=datamodule.test_dataloader())
-        test_eloss, test_floss = model.rmse_eng, model.rmse_fcs
+        test_eloss, test_floss = model.results['e_rmse'], model.results['f_rmse']
 
         print('E_RMSE (eV/atom), F_RMSE (eV/Ang)')
         print(f'\tTrain:\t{train_eloss}, \t{train_floss}')
@@ -154,13 +153,9 @@ def main():
         enable_progress_bar=False,
     )
 
-    model._val_dataloader = datamodule.val_dataloader()
-
     metric = EnergyForceLoss(
         evaluation_fxn = trainer.test,
         data_loader=datamodule.train_dataloader()
-        # data_loader=datamodule
-        # data_loader=None,
     )
 
     model_final = SimpleModelWrapper(model)  # needed for loss_landscapes
@@ -182,6 +177,107 @@ def main():
     save_name = 'L={}_d={:.2f}_s={}'.format('forces', args.distance, args.steps)
     full_path = os.path.join(args.save_dir, args.prefix+save_name)
     np.save(full_path, loss_data_fin[1])
+
+    # Generate figures
+    fig = plt.figure(figsize=(12, 4))
+
+    # Energy loss only
+    ax = fig.add_subplot(1, 3, 1, projection='3d')
+    ax.dist = 13
+
+    X = np.array([[j for j in range(eng_loss.shape[0])] for i in range(eng_loss.shape[1])])
+    Y = np.array([[i for _ in range(eng_loss.shape[0])] for i in range(eng_loss.shape[1])])
+
+    ax.plot_surface(X, Y, eng_loss, rstride=1, cstride=1, cmap='viridis', edgecolor='none')
+
+    ax.set_xticks(ticks)
+    ax.set_yticks(ticks)
+    ax.set_xticklabels(ticklabels)
+    ax.set_yticklabels(ticklabels)
+    ax.set_title(e_title, pad=10)
+    ax.set_xlabel(r"Normalized $d_1$", fontsize=12, labelpad=10)
+    ax.set_ylabel(r"Normalized $d_2$", fontsize=12, labelpad=10)
+
+    # Forces loss only
+    ax = fig.add_subplot(1, 3, 2, projection='3d')
+    ax.dist = 13
+
+    ax.plot_surface(X, Y, fcs_loss, rstride=1, cstride=1, cmap='viridis', edgecolor='none')
+
+    ax.set_xticks(ticks)
+    ax.set_yticks(ticks)
+    ax.set_xticklabels(ticklabels)
+    ax.set_yticklabels(ticklabels)
+    ax.set_title(f_title, pad=10)
+    ax.set_xlabel(r"Normalized $d_1$", fontsize=12, labelpad=10)
+    ax.set_ylabel(r"Normalized $d_2$", fontsize=12, labelpad=10)
+
+    # Combined
+    ax = fig.add_subplot(1, 3, 3, projection='3d')
+    ax.dist = 13
+
+    ax.plot_surface(X, Y, total, rstride=1, cstride=1, cmap='viridis', edgecolor='none')
+
+    ax.set_xticks(ticks)
+    ax.set_yticks(ticks)
+    ax.set_xticklabels(ticklabels)
+    ax.set_yticklabels(ticklabels)
+    ax.set_title(l_title, pad=10)
+    ax.set_xlabel(r"Normalized $d_1$", fontsize=12, labelpad=10)
+    ax.set_ylabel(r"Normalized $d_2$", fontsize=12, labelpad=10)
+
+    _ = plt.tight_layout()
+
+    save_name = 'L={}_d={:.2f}_s={}-3d.png'.format('forces', args.distance, args.steps)
+    full_path = os.path.join(args.save_dir, args.prefix+save_name)
+    plt.savefig(full_path)
+
+    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+
+    # Energy loss only
+    ax = axes[0]
+    c = ax.imshow(eng_loss)
+    cbar = fig.colorbar(c, ax=ax, fraction=0.045)
+
+    ax.set_xticks(ticks)
+    ax.set_yticks(ticks)
+    ax.set_xticklabels(ticklabels)
+    ax.set_yticklabels(ticklabels)
+    ax.set_title(e_title, pad=10)
+    ax.set_aspect('equal')
+
+    # Forces loss only
+    ax = axes[1]
+    c = ax.imshow(fcs_loss)
+    cbar = fig.colorbar(c, ax=ax, fraction=0.045)
+
+    ax.set_xticks(ticks)
+    ax.set_yticks(ticks)
+    ax.set_xticklabels(ticklabels)
+    ax.set_yticklabels(ticklabels)
+    ax.set_title(f_title, pad=10)
+    ax.set_aspect('equal')
+
+    # Combined
+    ax = axes[2]
+    c = ax.imshow(total)
+    cbar = fig.colorbar(c, ax=ax, fraction=0.045)
+
+    ax.set_xticks(ticks)
+    ax.set_yticks(ticks)
+    ax.set_xticklabels(ticklabels)
+    ax.set_yticklabels(ticklabels)
+    ax.set_title(l_title, pad=10)
+    ax.set_aspect('equal')
+
+    fig.text(0.5, 0.0, r'Normalized $d_1$', ha='center', fontsize=12)
+    fig.text(0.0, 0.5, r'Normalized $d_2$', va='center', rotation='vertical', fontsize=12)
+
+    _ = plt.tight_layout()
+
+    save_name = 'L={}_d={:.2f}_s={}-2d.png'.format('forces', args.distance, args.steps)
+    full_path = os.path.join(args.save_dir, args.prefix+save_name)
+    plt.savefig(full_path)
 
     print('Done generating loss landscape!')
 

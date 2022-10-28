@@ -5,24 +5,33 @@ import shutil
 import torch
 import numpy as np
 
+from schnetpack.representation import SchNet
+import schnetpack.properties as structure
+
 
 class SchNetModelWrapper(PLModelWrapper):
     """
     A wrapper for a SchNet model. Assumes that `model_path` contains a model
     checkpoint file with the name 'best_model'
     """
-    def __init__(self, model_path, copy_to_cwd=False, **kwargs):
-        super().__init__(model_dir=model_path, copy_to_cwd=copy_to_cwd)
+    def __init__(self, model_dir, **kwargs):
+        if 'representation_type' in kwargs:
+            self.representation_type = kwargs['representation_type']
+        else:
+            self.representation_type = 'node'
 
 
-    def load_model(self, model_path, **kwargs):
+        super().__init__(model_dir=model_dir, **kwargs)
+
+
+    def load_model(self, model_path):
         self.model = torch.load(
             os.path.join(model_path, 'best_model'),
             map_location=torch.device('cpu')
         )
 
 
-    def loss_fxn(self, batch):
+    def compute_loss(self, batch):
         true_eng = batch['energy']/batch['_n_atoms']
         true_fcs = batch['forces']
 
@@ -38,8 +47,45 @@ class SchNetModelWrapper(PLModelWrapper):
             'energy': np.mean(ediff**2),
             'force':  np.mean(fdiff**2),
             'batch_size': batch['energy'].shape[0],
-            'natoms': sum(batch['_n_atoms']),
+            'natoms': sum(batch['_n_atoms']).detach().cpu().numpy(),
         }
+
+
+    def compute_structure_representations(self, batch):
+        out = self.model.forward(batch)
+
+        with torch.no_grad():
+            representations = []
+
+            if self.representation_type in ['node', 'both']:
+                representations.append(batch['scalar_representation'])
+
+            if self.representation_type in ['edge', 'both']:
+
+                if isinstance(self.model.representation, SchNet):
+                    x = batch['scalar_representation']
+                    z = x.new_zeros((batch['scalar_representation'].shape[0], self.model.radial_basis.n_rbf))
+
+                    idx_i = batch[structure.idx_i]
+                    idx_j = batch[structure.idx_j]
+
+                    z.index_add_(0, idx_i, batch['distance_representation'])
+                    z.index_add_(0, idx_j, batch['distance_representation'])
+                else:  # PaiNN
+                    z = batch['vector_representation']
+                    z = torch.mean(z, dim=1)  # average over cartesian dimension
+
+                representations.append(z)
+
+        representations = torch.cat(representations, dim=1)
+
+        return {
+            'representations': representations,
+            'representations_splits': batch['_n_atoms'].detach().cpu().numpy().tolist(),
+            # 'representations_energy': batch_dict[AtomicDataDict.TOTAL_ENERGY_KEY],
+            'representations_energy': batch['energy'],
+        }
+
 
 
     def copy(self, model_path):

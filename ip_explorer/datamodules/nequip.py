@@ -26,7 +26,7 @@ class NequIPDataModule(PLDataModuleWrapper):
         super().__init__(stage=stage, **kwargs)
 
 
-    def setup(self, stage, **kwargs):
+    def setup(self, stage):
         """
         Arguments:
 
@@ -55,5 +55,6 @@ class NequIPDataModule(PLDataModuleWrapper):
         return DataLoader(
             dataset,
             batch_size=self.batch_size,
-            num_workers=self.num_workers
+            num_workers=self.num_workers,
+            shuffle=False,
         )
