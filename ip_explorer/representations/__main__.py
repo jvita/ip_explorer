@@ -115,12 +115,18 @@ def main():
     representations = model.results['representations'].detach().cpu().numpy()
     representations_energies = model.results['representations_energies'].detach().cpu().numpy()
 
+    print('REPRESENTATIONS SHAPE:', representations.shape)
+
     if representations.shape[0] != representations_energies.shape[0]:
         raise RuntimeError(f"# of representations ({representations.shape[0]}) != # of energies ({representations_energies.shape[0]}).")
 
     images = []
     for i, (v, e) in enumerate(zip(representations, representations_energies)):
-        atoms  =  Atoms('H', positions=[[0,0,0]])
+        atoms  =  Atoms(
+            'H',
+            positions=[[0,0,0]],
+            cell=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        )
 
         # SHEAP searches for "energy"
         atoms.info['energy'] = e

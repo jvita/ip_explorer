@@ -102,22 +102,24 @@ class NequIPModelWrapper(PLModelWrapper):
         out = self.model.forward(batch_dict)
 
         with torch.no_grad():
-            # z = out[AtomicDataDict.NODE_FEATURES_KEY]
             z = out['node_representations']
-            per_atom_representations = z.new_zeros(z.shape)
+            per_atom_representations = []
 
             if self.representation_type in ['node', 'both']:
-                per_atom_representations += z
+                per_atom_representations.append(z)
 
             if self.representation_type in ['edge', 'both']:
-                raise NotImplementedError("Still trying to figure out how to use the edge representations properly")
 
                 idx_i = out[AtomicDataDict.EDGE_INDEX_KEY][0, :]
                 idx_j = out[AtomicDataDict.EDGE_INDEX_KEY][1, :]
 
-                per_atom_representations.index_add_(0, idx_i, out['edge_representations'])
-                per_atom_representations.index_add_(0, idx_j, out['edge_representations'])
+                z_edge = z.new_zeros((z.shape[0], out['edge_representations'].shape[1]))
+                z_edge.index_add_(0, idx_i, out['edge_representations'])
+                z_edge.index_add_(0, idx_j, out['edge_representations'])
 
+                per_atom_representations.append(z_edge)
+
+        per_atom_representations = torch.cat(per_atom_representations, dim=1)
         splits = torch.unique(out['batch'], return_counts=True)[1]
 
         return {
