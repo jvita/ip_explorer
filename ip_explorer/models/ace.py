@@ -37,7 +37,8 @@ class ACEModelWrapper(PLModelWrapper):
         true_eng = batch['energy']/natoms
         true_fcs = batch['forces']
 
-        loss, grad_loss, pred_eng, pred_fcs = self.model._tflow_model.native_fit(batch)
+        # loss, grad_loss, pred_eng, pred_fcs = self.model._tflow_model.native_fit(batch)
+        loss, grad_loss, pred_eng, pred_fcs = self.model(batch)
 
         pred_eng = torch.from_numpy(pred_eng.numpy())/natoms
         pred_fcs = torch.from_numpy(pred_fcs.numpy())
@@ -54,6 +55,8 @@ class ACEModelWrapper(PLModelWrapper):
 
 
     def compute_structure_representations(self, batch):
+        raise NotImplementedError
+
         out = self.model.forward(batch)
 
         with torch.no_grad():
@@ -97,31 +100,31 @@ class ACEModelWrapper(PLModelWrapper):
         )
 
 
-# class ACETorchWrapper(ACE):
 class ACETorchWrapper(torch.nn.Module):
     """
-    This class wraps a TensorPotential implementation of ACE using
-    setters/getters on specific class attributes so that underlying Tensorflow
-    Variables are exposed as PyTorch Parameters.
+    This class wraps a TensorPotential implementation of ACE using hooks so that
+    the underlying Tensorflow Variables can be exposed as PyTorch Parameters.
     """
     def __init__(self, tflow_model):
         super().__init__()
 
         self._tflow_model = tflow_model
 
-        self._radial_coefs  = torch.nn.Parameter( torch.from_numpy(self._tflow_model.potential.fit_coefs[:self._tflow_model.potential.total_num_crad].numpy()))
-        self._basis_coefs   = torch.nn.Parameter(torch.from_numpy(self._tflow_model.potential.fit_coefs[self._tflow_model.potential.total_num_crad:].numpy()))
+        self.radial_coefs  = torch.nn.Parameter(torch.from_numpy(self._tflow_model.potential.fit_coefs[:self._tflow_model.potential.total_num_crad].numpy()))
+        self.basis_coefs   = torch.nn.Parameter(torch.from_numpy(self._tflow_model.potential.fit_coefs[self._tflow_model.potential.total_num_crad:].numpy()))
 
-    @property
-    def radial_coefs(self):
-        return self._radial_coefs
+        self.register_forward_pre_hook(self._tensorflow_copy_hook)
 
-    @radial_coefs.setter
-    def radial_coefs(self, coefs):
-        self._radial_coefs.copy_(coefs)
-        self._tflow_model.potential.set_coefs(
+
+    @staticmethod
+    def _tensorflow_copy_hook(module, inputs):
+        module._tflow_model.potential.set_coefs(
             np.concatenate([
-                self._radial_coefs.numpy(),
-                self._basis_coefs.numpy(),
+                module.radial_coefs.cpu().numpy(),
+                module.basis_coefs.cpu().numpy(),
             ])
         )
+
+
+    def forward(self, batch):
+        return self._tflow_model.native_fit(batch)
