@@ -95,6 +95,12 @@ class PLModelWrapper(pl.LightningModule):
         if self.model is None:
             raise RuntimeError("Failed to load model. Make sure to implement `load_model()` and assign `self.model`")
 
+        total_n_params = 0
+        for n, p in self.model.named_parameters():
+            total_n_params += np.prod(p.shape)
+
+        print("Total number of parameters:", total_n_params)
+
 
 
     def load_model(self, model_dir):
@@ -205,6 +211,11 @@ class PLModelWrapper(pl.LightningModule):
             per_struct_representations, 0, 1
         )
         per_struct_energies = torch.flatten(per_struct_energies, 0, 1)
+
+        n_reps = per_struct_representations.shape[0]
+        n_engs = per_struct_energies.shape[0]
+
+        assert n_reps == n_engs, "Incompatible shapes: {} representations, {} atoms".format(n_reps, n_engs)
 
         self.results['representations'] = per_struct_representations
         self.results['representations_energies'] = per_struct_energies
