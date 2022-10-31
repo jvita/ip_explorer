@@ -42,7 +42,6 @@ class NequIPModelWrapper(PLModelWrapper):
             os.path.join(traindir, 'config.yaml'),
         )
 
-        # self.model, _ = Trainer.load_model_from_training_session(traindir=traindir)
         self.model = model_from_config(config, initialize=False)
 
         if 'structure_representations' in self.values_to_compute:
@@ -88,8 +87,8 @@ class NequIPModelWrapper(PLModelWrapper):
     def _register_representations_hook(self):
         """Add hook for extracting the output of the final convolution layer"""
         def hook(model, inputs):
-            inputs[0]['node_representations'] = inputs[0][AtomicDataDict.NODE_FEATURES_KEY]
-            inputs[0]['edge_representations'] = inputs[0][AtomicDataDict.EDGE_EMBEDDING_KEY]
+            inputs[0]['node_representations'] = inputs[0][AtomicDataDict.NODE_FEATURES_KEY].clone()
+            inputs[0]['edge_representations'] = inputs[0][AtomicDataDict.EDGE_EMBEDDING_KEY].clone()
 
         for name, module in self.model.named_modules():
             # if name.split('.')[-1] == 'conv_to_output_hidden':
@@ -120,12 +119,11 @@ class NequIPModelWrapper(PLModelWrapper):
                 per_atom_representations.index_add_(0, idx_j, out['edge_representations'])
 
         splits = torch.unique(out['batch'], return_counts=True)[1]
-        splits = splits.detach().cpu().numpy().tolist()
 
         return {
             'representations': per_atom_representations,
-            'representations_splits': splits,
-            'representations_energy': batch_dict[AtomicDataDict.TOTAL_ENERGY_KEY],
+            'representations_splits': splits.detach().cpu().numpy().tolist(),
+            'representations_energy': batch_dict[AtomicDataDict.TOTAL_ENERGY_KEY]/splits[:, None],
         }
 
 
