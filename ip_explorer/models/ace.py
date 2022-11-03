@@ -120,8 +120,8 @@ class ACETorchWrapper(torch.nn.Module):
     def _tensorflow_copy_hook(module, inputs):
         module._tflow_model.potential.set_coefs(
             np.concatenate([
-                module.radial_coefs.cpu().numpy(),
-                module.basis_coefs.cpu().numpy(),
+                module.radial_coefs.detach().cpu().numpy(),
+                module.basis_coefs.detach().cpu().numpy(),
             ])
         )
 

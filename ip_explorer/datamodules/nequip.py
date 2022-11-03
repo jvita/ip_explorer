@@ -46,7 +46,6 @@ class NequIPDataModule(PLDataModuleWrapper):
             defaults={"r_max": model_config["r_max"]}
         )
 
-
         self.train_dataset  = dataset_from_config(dataset_config, prefix="dataset")
         self.test_dataset   = dataset_from_config(dataset_config, prefix="test_dataset")
         self.val_dataset    = dataset_from_config(dataset_config, prefix="validation_dataset")

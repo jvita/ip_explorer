@@ -11,7 +11,7 @@ parser = argparse.ArgumentParser(
     description="Generate potential energy surface"
 )
 
-parser.add_argument( '--prefix', type=str, help='Prefix to add to the beginning of logged files', dest='prefix', default='', required=False)
+parser.add_argument( '--prefix', type=str, help='Prefix to add to the beginning of logged files', dest='prefix', default='', required=False, nargs='?', const='')
 parser.add_argument( '--load-dir', type=str, help='Directory from which to load the data', dest='load_dir', required=True)
 parser.add_argument( '--n-components', type=int, help='Number of dimensions for SHEAP plot. Must be 2 or 3', dest='n_components', choices=[2,3], default=2)
 parser.add_argument( '--scale', type=float, help='Scaling factor for SHEAP volumes', dest='scale', default=1)
@@ -22,7 +22,6 @@ def main():
 
     input_fname = os.path.join(args.load_dir, args.prefix+f'sheap-{args.n_components}d.xyz')
 
-    print("Loading data from:", input_fname)
 
     if args.n_components == 2:
         data = np.loadtxt(input_fname, skiprows=2, usecols=(1, 2, 10, 8))  # x, y, size, color
@@ -105,6 +104,8 @@ def main():
         )
 
         fig.write_image(os.path.join(args.load_dir, args.prefix+'sheap-3d.png'))
+
+    print("Saving/loading data to/from:", args.load_dir)
 
 
 if __name__ == '__main__':

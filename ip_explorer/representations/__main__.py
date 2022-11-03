@@ -45,7 +45,7 @@ parser.set_defaults(overwrite=False)
 
 parser.add_argument( '--model-type', type=str, help='Type of model being used.  Must be one of the supported types from ip_explorer', dest='model_type', required=True)
 parser.add_argument( '--database-path', type=str, help='Path to formatted schnetpack.data.ASEAtomsData database', dest='database_path', required=True)
-parser.add_argument( '--model-path', type=str, help='Full path to model checkpoint file', dest='model_path', required=True,) 
+parser.add_argument( '--model-path', type=str, help='Full path to model checkpoint file', dest='model_path', default='.') 
 
 parser.add_argument( '--batch-size', type=int, help='Batch size for data loaders', dest='batch_size', default=128, required=False,)
 parser.add_argument( '--slice', type=int, help='Step size to use when reducing data size via slicing', default=1, dest='slice', required=False,)
@@ -80,7 +80,6 @@ def main():
         os.makedirs(args.save_dir)
 
     os.chdir(args.save_dir)
-    print("Saving results in:", args.save_dir)
 
     additional_kwargs = {}
     for kv_pair in args.additional_kwargs.split():
@@ -143,6 +142,8 @@ def main():
         images.append(atoms)
 
     write(os.path.join(args.save_dir, args.prefix+'representations.xyz'), images, format='extxyz')
+
+    print("Saving results in:", args.save_dir)
 
     if 'SHEAP_PATH' not in os.environ:
         return

@@ -95,13 +95,6 @@ class PLModelWrapper(pl.LightningModule):
         if self.model is None:
             raise RuntimeError("Failed to load model. Make sure to implement `load_model()` and assign `self.model`")
 
-        total_n_params = 0
-        for n, p in self.model.named_parameters():
-            total_n_params += np.prod(p.shape)
-
-        print("Total number of parameters:", total_n_params)
-
-
 
     def load_model(self, model_dir):
         """

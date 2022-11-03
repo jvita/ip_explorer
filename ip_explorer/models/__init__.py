@@ -1,12 +1,15 @@
 from .schnet import SchNetModelWrapper
 from .nequip import NequIPModelWrapper
 from .ace import ACEModelWrapper
+from .valle_oganov import ValleOganovModelWrapper
 
 implemented_wrappers = {
-    'schnet':   SchNetModelWrapper,
-    'painn':    SchNetModelWrapper,
-    'nequip':   NequIPModelWrapper,
-    'ace':      ACEModelWrapper,
+    'schnet':       SchNetModelWrapper,
+    'painn':        SchNetModelWrapper,
+    'nequip':       NequIPModelWrapper,
+    'allegro':      NequIPModelWrapper,
+    'ace':          ACEModelWrapper,
+    'valle-oganov': ValleOganovModelWrapper,
 }
 
 def get_model_wrapper(model_type):

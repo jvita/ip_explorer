@@ -82,7 +82,6 @@ def main():
         os.makedirs(args.save_dir)
 
     os.chdir(args.save_dir)
-    print("Saving results in:", args.save_dir)
 
     additional_kwargs = {}
     for kv_pair in args.additional_kwargs.split():
@@ -104,6 +103,9 @@ def main():
     model.eval()
 
     if args.compute_initial_losses:
+
+        if args.num_nodes > 1:
+            raise RuntimeError('compute-initial-losses=True should not be used with num-nodes>1')
 
         # TODO: use devices=1 for train/test/val verification to avoid
         # duplicating data, as suggested on this page:
@@ -282,9 +284,23 @@ def main():
     full_path = os.path.join(args.save_dir, args.prefix+save_name)
     plt.savefig(full_path)
 
+    print("Saving results in:", args.save_dir)
+
     print('Done generating loss landscape!')
 
 
 if __name__ == '__main__':
     os.environ['GPUS_PER_NODE'] = str(args.gpus_per_node)
+
+    os.environ['MASTER_ADDR']   = os.environ['MASTER_ADDR']
+    os.environ['MASTER_PORT']   = '4444'
+    os.environ['WORLD_SIZE']    = os.environ['LSB_DJOB_NUMPROC']
+    os.environ['NODE_RANK']     = os.environ['JSM_NAMESPACE_RANK']
+
+    print('MASTER_ADDR:', os.environ['MASTER_ADDR'])
+    print('MASTER_PORT:', os.environ['MASTER_PORT'])
+    print('WORLD_SIZE:', os.environ['WORLD_SIZE'])
+    print('NODE_RANK:', os.environ['NODE_RANK'])
+
+
     main()
