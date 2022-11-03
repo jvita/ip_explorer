@@ -1,6 +1,7 @@
 from .schnet import SchNetModelWrapper
 from .nequip import NequIPModelWrapper
 from .ace import ACEModelWrapper
+from .mace import MACEModelWrapper
 from .valle_oganov import ValleOganovModelWrapper
 
 implemented_wrappers = {
@@ -9,6 +10,7 @@ implemented_wrappers = {
     'nequip':       NequIPModelWrapper,
     'allegro':      NequIPModelWrapper,
     'ace':          ACEModelWrapper,
+    'mace':         MACEModelWrapper,
     'valle-oganov': ValleOganovModelWrapper,
 }
 

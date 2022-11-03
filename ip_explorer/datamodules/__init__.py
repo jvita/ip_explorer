@@ -1,6 +1,7 @@
 from .schnet import SchNetDataModule
 from .nequip import NequIPDataModule
 from .ace import ACEDataModule
+from .mace import MACEDataModule
 from .ase import ASEDataModule
 
 
@@ -10,6 +11,7 @@ implemented_datamodules = {
     'nequip':       NequIPDataModule,
     'allegro':      NequIPDataModule,
     'ace':          ACEDataModule,
+    'mace':         MACEDataModule,
     'valle-oganov': ASEDataModule,
 }
 

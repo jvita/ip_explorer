@@ -86,12 +86,6 @@ def main():
         k, v = kv_pair.split(':')
         additional_kwargs[k] = v
 
-    datamodule = get_datamodule_wrapper(args.model_type)(
-        args.database_path,
-        batch_size=args.batch_size,
-        num_workers=int(np.floor(int(os.environ['LSB_MAX_NUM_PROCESSORS'])/int(os.environ['GPUS_PER_NODE']))),
-        **additional_kwargs,
-    )
     model = get_model_wrapper(args.model_type)(
         model_dir=args.model_path,
         values_to_compute=('structure_representations',),
@@ -100,6 +94,13 @@ def main():
     )
 
     model.eval()
+
+    datamodule = get_datamodule_wrapper(args.model_type)(
+        args.database_path,
+        batch_size=args.batch_size,
+        num_workers=int(np.floor(int(os.environ['LSB_MAX_NUM_PROCESSORS'])/int(os.environ['GPUS_PER_NODE']))),
+        **additional_kwargs,
+    )
 
     trainer = pl.Trainer(
         num_nodes=args.num_nodes,
