@@ -159,13 +159,6 @@ def main():
     # Switch to using a distributed model. Note that this means there will be
     # some noise in the generated landscapes due to batch padding.
 
-    """
-    I think the multi-node logic is messed up here.
-
-    - Everyone needs to eneter trainer.test, which is done in EnergyForceLoss
-    - But NOT everyone needs to enter the LL code
-    """
-
     trainer = pl.Trainer(
         num_nodes=args.num_nodes,
         devices=args.gpus_per_node,
@@ -315,3 +308,5 @@ if __name__ == '__main__':
 
     os.environ['MASTER_ADDR']   = os.environ['MASTER_ADDR']
     os.environ['MASTER_PORT']   = str(args.port)
+
+    main()
