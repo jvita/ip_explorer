@@ -81,6 +81,7 @@ class PLModelWrapper(pl.LightningModule):
                 raise RuntimeError(f"Failed to find function `compute_{value}`.  Make sure to define 'compute_<value>' and 'aggregate_<value> for each <value> specified in `values_to_compute`")
 
         # Other administrative tasks
+        self.results = {}
         self.reset_results_on_epoch_start = reset_results_on_epoch_start
 
         if copy_to_cwd:

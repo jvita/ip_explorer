@@ -3,8 +3,10 @@ from .nequip import NequIPModelWrapper
 from .ace import ACEModelWrapper
 from .mace import MACEModelWrapper
 from .valle_oganov import ValleOganovModelWrapper
+from .test import TestModelWrapper
 
 implemented_wrappers = {
+    'test':         TestModelWrapper,
     'schnet':       SchNetModelWrapper,
     'painn':        SchNetModelWrapper,
     'nequip':       NequIPModelWrapper,

@@ -13,6 +13,7 @@ import os
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
+from mpi4py import MPI
 
 import pytorch_lightning as pl
 
@@ -32,6 +33,7 @@ parser = argparse.ArgumentParser(
 )
 
 # Add CLI arguments
+parser.add_argument( '--port', type=int, help='The port with which to connect to the master rank', dest='port', default=4739, required=False,)
 parser.add_argument( '--seed', type=int, help='The random seed to use', dest='seed', default=None, required=False,)
 parser.add_argument( '--num-nodes', type=int, help='The number of nodes available for training', dest='num_nodes', required=True,) 
 parser.add_argument( '--gpus-per-node', type=int, help='The number of GPUs per node to use', dest='gpus_per_node', default=1, required=False,) 
@@ -77,9 +79,16 @@ torch.backends.cudnn.deterministic = True
 
 
 def main():
+
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+
     # Setup
-    if not os.path.isdir(args.save_dir):
-        os.makedirs(args.save_dir)
+    if rank == 0:
+        if not os.path.isdir(args.save_dir):
+            os.makedirs(args.save_dir)
+
+    comm.Barrier()  # wait for save directory to be created
 
     os.chdir(args.save_dir)
 
@@ -88,12 +97,6 @@ def main():
         k, v = kv_pair.split(':')
         additional_kwargs[k] = v
 
-    datamodule = get_datamodule_wrapper(args.model_type)(
-        args.database_path,
-        batch_size=args.batch_size,
-        num_workers=int(np.floor(int(os.environ['LSB_MAX_NUM_PROCESSORS'])/int(os.environ['GPUS_PER_NODE']))),
-        **additional_kwargs,
-    )
     model = get_model_wrapper(args.model_type)(
         model_dir=args.model_path,
         copy_to_cwd=True,
@@ -101,6 +104,14 @@ def main():
     )
 
     model.eval()
+
+    datamodule = get_datamodule_wrapper(args.model_type)(
+        args.database_path,
+        batch_size=args.batch_size,
+        # num_workers=int(np.floor(int(os.environ['LSB_MAX_NUM_PROCESSORS'])/int(args.gpus_per_node)/int(args.num_nodes))),
+        num_workers=0,
+        **additional_kwargs,
+    )
 
     if args.compute_initial_losses:
 
@@ -147,9 +158,18 @@ def main():
 
     # Switch to using a distributed model. Note that this means there will be
     # some noise in the generated landscapes due to batch padding.
+
+    """
+    I think the multi-node logic is messed up here.
+
+    - Everyone needs to eneter trainer.test, which is done in EnergyForceLoss
+    - But NOT everyone needs to enter the LL code
+    """
+
     trainer = pl.Trainer(
         num_nodes=args.num_nodes,
         devices=args.gpus_per_node,
+        # devices=1,
         accelerator='cuda',
         strategy='ddp',
         enable_progress_bar=False,
@@ -172,135 +192,126 @@ def main():
         n_loss_terms=2,
     )
 
-    save_name = 'L={}_d={:.2f}_s={}'.format('energy', args.distance, args.steps)
-    full_path = os.path.join(args.save_dir, args.prefix+save_name)
-    np.save(full_path, loss_data_fin[0])
+    if rank == 0:
+        save_name = 'L={}_d={:.2f}_s={}'.format('energy', args.distance, args.steps)
+        full_path = os.path.join(args.save_dir, args.prefix+save_name)
+        np.save(full_path, loss_data_fin[0])
 
-    save_name = 'L={}_d={:.2f}_s={}'.format('forces', args.distance, args.steps)
-    full_path = os.path.join(args.save_dir, args.prefix+save_name)
-    np.save(full_path, loss_data_fin[1])
+        save_name = 'L={}_d={:.2f}_s={}'.format('forces', args.distance, args.steps)
+        full_path = os.path.join(args.save_dir, args.prefix+save_name)
+        np.save(full_path, loss_data_fin[1])
 
-    eng_loss = loss_data_fin[0]
-    fcs_loss = loss_data_fin[1]
+        eng_loss = loss_data_fin[0]
+        fcs_loss = loss_data_fin[1]
 
-    # Generate figures
-    fig = plt.figure(figsize=(12, 4))
+        # Generate figures
+        fig = plt.figure(figsize=(12, 4))
 
-    # Energy loss only
-    ax = fig.add_subplot(1, 3, 1, projection='3d')
-    ax.dist = 13
+        # Energy loss only
+        ax = fig.add_subplot(1, 3, 1, projection='3d')
+        ax.dist = 13
 
-    X = np.array([[j for j in range(eng_loss.shape[0])] for i in range(eng_loss.shape[1])])
-    Y = np.array([[i for _ in range(eng_loss.shape[0])] for i in range(eng_loss.shape[1])])
+        X = np.array([[j for j in range(eng_loss.shape[0])] for i in range(eng_loss.shape[1])])
+        Y = np.array([[i for _ in range(eng_loss.shape[0])] for i in range(eng_loss.shape[1])])
 
-    ax.plot_surface(X, Y, eng_loss, rstride=1, cstride=1, cmap='viridis', edgecolor='none')
+        ax.plot_surface(X, Y, eng_loss, rstride=1, cstride=1, cmap='viridis', edgecolor='none')
 
-    ax.set_xticks(ticks)
-    ax.set_yticks(ticks)
-    ax.set_xticklabels(ticklabels)
-    ax.set_yticklabels(ticklabels)
-    ax.set_title(e_title, pad=10)
-    ax.set_xlabel(r"Normalized $d_1$", fontsize=12, labelpad=10)
-    ax.set_ylabel(r"Normalized $d_2$", fontsize=12, labelpad=10)
+        ax.set_xticks(ticks)
+        ax.set_yticks(ticks)
+        ax.set_xticklabels(ticklabels)
+        ax.set_yticklabels(ticklabels)
+        ax.set_title(e_title, pad=10)
+        ax.set_xlabel(r"Normalized $d_1$", fontsize=12, labelpad=10)
+        ax.set_ylabel(r"Normalized $d_2$", fontsize=12, labelpad=10)
 
-    # Forces loss only
-    ax = fig.add_subplot(1, 3, 2, projection='3d')
-    ax.dist = 13
+        # Forces loss only
+        ax = fig.add_subplot(1, 3, 2, projection='3d')
+        ax.dist = 13
 
-    ax.plot_surface(X, Y, fcs_loss, rstride=1, cstride=1, cmap='viridis', edgecolor='none')
+        ax.plot_surface(X, Y, fcs_loss, rstride=1, cstride=1, cmap='viridis', edgecolor='none')
 
-    ax.set_xticks(ticks)
-    ax.set_yticks(ticks)
-    ax.set_xticklabels(ticklabels)
-    ax.set_yticklabels(ticklabels)
-    ax.set_title(f_title, pad=10)
-    ax.set_xlabel(r"Normalized $d_1$", fontsize=12, labelpad=10)
-    ax.set_ylabel(r"Normalized $d_2$", fontsize=12, labelpad=10)
+        ax.set_xticks(ticks)
+        ax.set_yticks(ticks)
+        ax.set_xticklabels(ticklabels)
+        ax.set_yticklabels(ticklabels)
+        ax.set_title(f_title, pad=10)
+        ax.set_xlabel(r"Normalized $d_1$", fontsize=12, labelpad=10)
+        ax.set_ylabel(r"Normalized $d_2$", fontsize=12, labelpad=10)
 
-    # Combined
-    ax = fig.add_subplot(1, 3, 3, projection='3d')
-    ax.dist = 13
+        # Combined
+        ax = fig.add_subplot(1, 3, 3, projection='3d')
+        ax.dist = 13
 
-    ax.plot_surface(X, Y, total, rstride=1, cstride=1, cmap='viridis', edgecolor='none')
+        ax.plot_surface(X, Y, total, rstride=1, cstride=1, cmap='viridis', edgecolor='none')
 
-    ax.set_xticks(ticks)
-    ax.set_yticks(ticks)
-    ax.set_xticklabels(ticklabels)
-    ax.set_yticklabels(ticklabels)
-    ax.set_title(l_title, pad=10)
-    ax.set_xlabel(r"Normalized $d_1$", fontsize=12, labelpad=10)
-    ax.set_ylabel(r"Normalized $d_2$", fontsize=12, labelpad=10)
+        ax.set_xticks(ticks)
+        ax.set_yticks(ticks)
+        ax.set_xticklabels(ticklabels)
+        ax.set_yticklabels(ticklabels)
+        ax.set_title(l_title, pad=10)
+        ax.set_xlabel(r"Normalized $d_1$", fontsize=12, labelpad=10)
+        ax.set_ylabel(r"Normalized $d_2$", fontsize=12, labelpad=10)
 
-    _ = plt.tight_layout()
+        _ = plt.tight_layout()
 
-    save_name = 'L={}_d={:.2f}_s={}-3d.png'.format('forces', args.distance, args.steps)
-    full_path = os.path.join(args.save_dir, args.prefix+save_name)
-    plt.savefig(full_path)
+        save_name = 'L={}_d={:.2f}_s={}-3d.png'.format('forces', args.distance, args.steps)
+        full_path = os.path.join(args.save_dir, args.prefix+save_name)
+        plt.savefig(full_path)
 
-    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+        fig, axes = plt.subplots(1, 3, figsize=(12, 4))
 
-    # Energy loss only
-    ax = axes[0]
-    c = ax.imshow(eng_loss)
-    cbar = fig.colorbar(c, ax=ax, fraction=0.045)
+        # Energy loss only
+        ax = axes[0]
+        c = ax.imshow(eng_loss)
+        cbar = fig.colorbar(c, ax=ax, fraction=0.045)
 
-    ax.set_xticks(ticks)
-    ax.set_yticks(ticks)
-    ax.set_xticklabels(ticklabels)
-    ax.set_yticklabels(ticklabels)
-    ax.set_title(e_title, pad=10)
-    ax.set_aspect('equal')
+        ax.set_xticks(ticks)
+        ax.set_yticks(ticks)
+        ax.set_xticklabels(ticklabels)
+        ax.set_yticklabels(ticklabels)
+        ax.set_title(e_title, pad=10)
+        ax.set_aspect('equal')
 
-    # Forces loss only
-    ax = axes[1]
-    c = ax.imshow(fcs_loss)
-    cbar = fig.colorbar(c, ax=ax, fraction=0.045)
+        # Forces loss only
+        ax = axes[1]
+        c = ax.imshow(fcs_loss)
+        cbar = fig.colorbar(c, ax=ax, fraction=0.045)
 
-    ax.set_xticks(ticks)
-    ax.set_yticks(ticks)
-    ax.set_xticklabels(ticklabels)
-    ax.set_yticklabels(ticklabels)
-    ax.set_title(f_title, pad=10)
-    ax.set_aspect('equal')
+        ax.set_xticks(ticks)
+        ax.set_yticks(ticks)
+        ax.set_xticklabels(ticklabels)
+        ax.set_yticklabels(ticklabels)
+        ax.set_title(f_title, pad=10)
+        ax.set_aspect('equal')
 
-    # Combined
-    ax = axes[2]
-    c = ax.imshow(total)
-    cbar = fig.colorbar(c, ax=ax, fraction=0.045)
+        # Combined
+        ax = axes[2]
+        c = ax.imshow(total)
+        cbar = fig.colorbar(c, ax=ax, fraction=0.045)
 
-    ax.set_xticks(ticks)
-    ax.set_yticks(ticks)
-    ax.set_xticklabels(ticklabels)
-    ax.set_yticklabels(ticklabels)
-    ax.set_title(l_title, pad=10)
-    ax.set_aspect('equal')
+        ax.set_xticks(ticks)
+        ax.set_yticks(ticks)
+        ax.set_xticklabels(ticklabels)
+        ax.set_yticklabels(ticklabels)
+        ax.set_title(l_title, pad=10)
+        ax.set_aspect('equal')
 
-    fig.text(0.5, 0.0, r'Normalized $d_1$', ha='center', fontsize=12)
-    fig.text(0.0, 0.5, r'Normalized $d_2$', va='center', rotation='vertical', fontsize=12)
+        fig.text(0.5, 0.0, r'Normalized $d_1$', ha='center', fontsize=12)
+        fig.text(0.0, 0.5, r'Normalized $d_2$', va='center', rotation='vertical', fontsize=12)
 
-    _ = plt.tight_layout()
+        _ = plt.tight_layout()
 
-    save_name = 'L={}_d={:.2f}_s={}-2d.png'.format('forces', args.distance, args.steps)
-    full_path = os.path.join(args.save_dir, args.prefix+save_name)
-    plt.savefig(full_path)
+        save_name = 'L={}_d={:.2f}_s={}-2d.png'.format('forces', args.distance, args.steps)
+        full_path = os.path.join(args.save_dir, args.prefix+save_name)
+        plt.savefig(full_path)
 
-    print("Saving results in:", args.save_dir)
+        print("Saving results in:", args.save_dir)
 
-    print('Done generating loss landscape!')
+        print('Done generating loss landscape!')
 
 
 if __name__ == '__main__':
     os.environ['GPUS_PER_NODE'] = str(args.gpus_per_node)
 
     os.environ['MASTER_ADDR']   = os.environ['MASTER_ADDR']
-    os.environ['MASTER_PORT']   = '4444'
-    os.environ['WORLD_SIZE']    = os.environ['LSB_DJOB_NUMPROC']
-    os.environ['NODE_RANK']     = os.environ['JSM_NAMESPACE_RANK']
-
-    print('MASTER_ADDR:', os.environ['MASTER_ADDR'])
-    print('MASTER_PORT:', os.environ['MASTER_PORT'])
-    print('WORLD_SIZE:', os.environ['WORLD_SIZE'])
-    print('NODE_RANK:', os.environ['NODE_RANK'])
-
-
-    main()
+    os.environ['MASTER_PORT']   = str(args.port)

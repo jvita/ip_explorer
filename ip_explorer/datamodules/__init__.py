@@ -3,9 +3,11 @@ from .nequip import NequIPDataModule
 from .ace import ACEDataModule
 from .mace import MACEDataModule
 from .ase import ASEDataModule
+from .test import TestDataModule
 
 
 implemented_datamodules = {
+    'test':         TestDataModule,
     'schnet':       SchNetDataModule,
     'painn':        SchNetDataModule,
     'nequip':       NequIPDataModule,
