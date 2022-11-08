@@ -57,16 +57,15 @@ class MACEModelWrapper(PLModelWrapper):
 
     def compute_loss(self, batch):
 
-        natoms = torch.unique(torch.from_numpy(batch['cell_map']), return_counts=True)[1]
+        natoms = torch.unique(batch.batch, return_counts=True)[1]
 
-        true_eng = batch['energy']/natoms
-        true_fcs = batch['forces']
+        true_eng = batch.energy/natoms
+        true_fcs = batch.forces
 
-        # loss, grad_loss, pred_eng, pred_fcs = self.model._tflow_model.native_fit(batch)
-        loss, grad_loss, pred_eng, pred_fcs = self.model(batch)
+        results = self.model(batch)
 
-        pred_eng = torch.from_numpy(pred_eng.numpy())/natoms
-        pred_fcs = torch.from_numpy(pred_fcs.numpy())
+        pred_eng = results['energy']/natoms
+        pred_fcs = results['forces']
 
         ediff = (pred_eng - true_eng).detach().cpu().numpy()
         fdiff = (pred_fcs - true_fcs).detach().cpu().numpy()
@@ -74,7 +73,7 @@ class MACEModelWrapper(PLModelWrapper):
         return {
             'energy': np.mean(ediff**2),
             'force':  np.mean(fdiff**2),
-            'batch_size': batch['energy'].shape[0],
+            'batch_size': batch.energy.shape[0],
             'natoms': sum(natoms).detach().cpu().numpy(),
         }
 
@@ -84,7 +83,8 @@ class MACEModelWrapper(PLModelWrapper):
         def hook(model, inputs):
             self._node_representations.append(inputs[0])
 
-        # MACE has multiple readout layers for each N-body interaction
+        # There are readout layers for each interaction block, which are then
+        # summed. This is Eq. 4 in the MACE paper.
         for module in self.model.readouts:
             module.register_forward_pre_hook(hook)
 
