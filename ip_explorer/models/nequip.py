@@ -38,11 +38,9 @@ class NequIPModelWrapper(PLModelWrapper):
 
     def load_model(self, traindir):
 
-        config = Config.from_file(
-            os.path.join(traindir, 'config.yaml'),
+        self.model, config = Trainer.load_model_from_training_session(
+            traindir=traindir, model_name='best_model.pth'
         )
-
-        self.model = model_from_config(config, initialize=False)
 
         if 'structure_representations' in self.values_to_compute:
             self._register_representations_hook()
