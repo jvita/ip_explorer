@@ -37,6 +37,7 @@ class MACEDataModule(PLDataModuleWrapper):
         """
 
         train   = config_from_atoms_list(read(os.path.join(stage, 'train.xyz'), format='extxyz', index=':'))
+        # train   = config_from_atoms_list(read(os.path.join(stage, 'test.xyz'), format='extxyz', index=':'))
         test    = config_from_atoms_list(read(os.path.join(stage, 'test.xyz'), format='extxyz', index=':'))
         val     = config_from_atoms_list(read(os.path.join(stage, 'val.xyz'), format='extxyz', index=':'))
 

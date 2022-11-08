@@ -3,6 +3,7 @@ from .nequip import NequIPModelWrapper
 from .ace import ACEModelWrapper
 from .mace import MACEModelWrapper
 from .valle_oganov import ValleOganovModelWrapper
+from .vgop import VGOPModelWrapper
 from .test import TestModelWrapper
 
 implemented_wrappers = {
@@ -14,6 +15,7 @@ implemented_wrappers = {
     'ace':          ACEModelWrapper,
     'mace':         MACEModelWrapper,
     'valle-oganov': ValleOganovModelWrapper,
+    'vgop':         VGOPModelWrapper,
 }
 
 def get_model_wrapper(model_type):

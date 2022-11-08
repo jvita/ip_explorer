@@ -15,6 +15,7 @@ implemented_datamodules = {
     'ace':          ACEDataModule,
     'mace':         MACEDataModule,
     'valle-oganov': ASEDataModule,
+    'vgop':         ASEDataModule,
 }
 
 def get_datamodule_wrapper(datamodule_type):
