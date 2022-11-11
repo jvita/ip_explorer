@@ -67,7 +67,16 @@ print(args)
 
 # Seed RNGs
 if args.seed is None:
-    args.seed = np.random.randint()
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+
+    local_seed = np.random.randint(1000)
+
+    global_seed = int(np.average(comm.allgather(local_seed)))
+
+    args.seed = global_seed
+
+    logging.info(f"Random seed must be consistent across all processes to ensure landscape correctness. Settting to {args.seed}")
 
 torch.manual_seed(args.seed)
 torch.cuda.manual_seed(args.seed)
@@ -115,20 +124,16 @@ def main():
 
     if args.compute_initial_losses:
 
-        if args.num_nodes > 1:
-            raise RuntimeError('compute-initial-losses=True should not be used with num-nodes>1')
-
         # TODO: use devices=1 for train/test/val verification to avoid
         # duplicating data, as suggested on this page:
         # https://pytorch-lightning.readthedocs.io/en/stable/common/evaluation_intermediate.html
-
-        # Compute initial train/val/test losses
         trainer = pl.Trainer(
             num_nodes=1,
             devices=1,
             accelerator='cuda',
         )
 
+        # Compute initial train/val/test losses
         print('Computing training errors with devices=1 to avoid batch padding errors', flush=True)
         trainer.test(model, dataloaders=datamodule.train_dataloader())
         train_eloss, train_floss = model.results['e_rmse'], model.results['f_rmse']
@@ -151,7 +156,7 @@ def main():
         ])
 
         np.savetxt(
-            os.path.join(args.save_dir, args.prefix+'errors'),
+            os.path.join(args.save_dir, args.prefix+'errors_'+args.model_type),
             errors,
             header='col=[E_RMSE, F_RMSE] (eV/atom, eV/Ang); row=[train, test, val]'
         )
@@ -162,12 +167,12 @@ def main():
     trainer = pl.Trainer(
         num_nodes=args.num_nodes,
         devices=args.gpus_per_node,
-        # devices=1,
         accelerator='cuda',
         strategy='ddp',
         enable_progress_bar=False,
     )
 
+    # TODO: maybe there's an issue with getting the dataloader?
     metric = EnergyForceLoss(
         evaluation_fxn = trainer.test,
         data_loader=datamodule.train_dataloader()
@@ -186,12 +191,12 @@ def main():
     )
 
     if rank == 0:
-        save_name = 'L={}_d={:.2f}_s={}'.format('energy', args.distance, args.steps)
-        full_path = os.path.join(args.save_dir, args.prefix+save_name)
+        save_name = 'L={}_d={:.2f}_s={}_'.format('energy', args.distance, args.steps)
+        full_path = os.path.join(args.save_dir, args.prefix+save_name+args.model_type)
         np.save(full_path, loss_data_fin[0])
 
-        save_name = 'L={}_d={:.2f}_s={}'.format('forces', args.distance, args.steps)
-        full_path = os.path.join(args.save_dir, args.prefix+save_name)
+        save_name = 'L={}_d={:.2f}_s={}_'.format('forces', args.distance, args.steps)
+        full_path = os.path.join(args.save_dir, args.prefix+save_name+args.model_type)
         np.save(full_path, loss_data_fin[1])
 
         eng_loss = loss_data_fin[0]
@@ -247,7 +252,7 @@ def main():
 
         _ = plt.tight_layout()
 
-        save_name = 'L={}_d={:.2f}_s={}-3d.png'.format('forces', args.distance, args.steps)
+        save_name = 'L={}_d={:.2f}_s={}-3d_{}.png'.format('forces', args.distance, args.steps, args.model_type)
         full_path = os.path.join(args.save_dir, args.prefix+save_name)
         plt.savefig(full_path)
 
@@ -294,7 +299,7 @@ def main():
 
         _ = plt.tight_layout()
 
-        save_name = 'L={}_d={:.2f}_s={}-2d.png'.format('forces', args.distance, args.steps)
+        save_name = 'L={}_d={:.2f}_s={}-2d_{}.png'.format('forces', args.distance, args.steps, args.model_type)
         full_path = os.path.join(args.save_dir, args.prefix+save_name)
         plt.savefig(full_path)
 
@@ -306,7 +311,25 @@ def main():
 if __name__ == '__main__':
     os.environ['GPUS_PER_NODE'] = str(args.gpus_per_node)
 
-    os.environ['MASTER_ADDR']   = os.environ['MASTER_ADDR']
-    os.environ['MASTER_PORT']   = str(args.port)
+    # use slurm job id for the port number
+    # guarantees unique ports across jobs from same grid search
+    try:
+        # use the last 4 numbers in the job id as the id
+        default_port = os.environ['LSB_JOBID']
+        default_port = default_port[-4:]
+
+        # all ports should be in the 10k+ range
+        default_port = int(default_port) + 10000
+
+    except Exception as e:
+        default_port = 12910
+
+    os.environ['MASTER_PORT']   = str(default_port)
+
+    comm = MPI.COMM_WORLD
+    rank = comm.Get_rank()
+
+    print(f'[rank={rank}] MASTER ADDR:', os.environ['MASTER_ADDR'])
+    print(f'[rank={rank}] MASTER PORT:', os.environ['MASTER_PORT'])
 
     main()
