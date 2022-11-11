@@ -1,6 +1,7 @@
 from .base import PLDataModuleWrapper
 
 import os
+import ast
 import numpy as np
 
 import schnetpack.transform as tform
@@ -24,6 +25,11 @@ class SchNetDataModule(PLDataModuleWrapper):
 
         self.cutoff = float(kwargs['cutoff'])
 
+        if 'remove_offsets' not in kwargs:
+            self.remove_offsets = True
+        else:
+            self.remove_offsets = ast.literal_eval(kwargs['remove_offsets'])
+
         super().__init__(stage=stage, **kwargs)
 
 
@@ -34,6 +40,16 @@ class SchNetDataModule(PLDataModuleWrapper):
         __init__()
         """
 
+        transforms = [
+            tform.MatScipyNeighborList(cutoff=self.cutoff),
+        ]
+
+        if self.remove_offsets:
+            transforms.insert(
+                0,
+                tform.RemoveOffsets('energy', remove_mean=True, remove_atomrefs=False)
+            )
+
         datamodule = AtomsDataModule(
             datapath=os.path.join(stage, 'full.db'),
             split_file=os.path.join(stage, 'split.npz'),
@@ -41,10 +57,7 @@ class SchNetDataModule(PLDataModuleWrapper):
             load_properties=['energy', 'forces'],
             batch_size=self.batch_size,
             num_workers=self.num_workers,
-            transforms=[
-                tform.RemoveOffsets('energy', remove_mean=True, remove_atomrefs=False),
-                tform.MatScipyNeighborList(cutoff=self.cutoff),
-            ],
+            transforms=transforms,
         )
 
         datamodule.setup()
