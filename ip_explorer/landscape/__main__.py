@@ -28,6 +28,12 @@ from ip_explorer.landscape.loss import EnergyForceLoss
 import logging
 logging.getLogger("pytorch_lightning").setLevel(logging.WARNING)
 
+logging.basicConfig(
+    format='%(asctime)s %(levelname)-8s %(message)s',
+    level=logging.INFO,
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
 parser = argparse.ArgumentParser(
     description="Generate loss landscapes"
 )
@@ -208,6 +214,9 @@ def main():
         # Energy loss only
         ax = fig.add_subplot(1, 3, 1, projection='3d')
         ax.dist = 13
+
+        ticks      = np.array([0, args.steps//2, args.steps-1])
+        ticklabels = np.array([-args.distance/2, 0, args.distance/2])
 
         X = np.array([[j for j in range(eng_loss.shape[0])] for i in range(eng_loss.shape[1])])
         Y = np.array([[i for _ in range(eng_loss.shape[0])] for i in range(eng_loss.shape[1])])
