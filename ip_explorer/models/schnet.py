@@ -47,11 +47,15 @@ class SchNetModelWrapper(PLModelWrapper):
             'energy': np.mean(ediff**2),
             'force':  np.mean(fdiff**2),
             'batch_size': batch['energy'].shape[0],
-            'natoms': sum(batch['_n_atoms']).detach().cpu().numpy(),
+            'natoms': int(sum(batch['_n_atoms']).detach().cpu().numpy()),
         }
 
 
     def compute_structure_representations(self, batch):
+
+        # remember: .forward() overwrites the ['energy'] key
+        true_eng = (batch['energy']/batch['_n_atoms']).clone()
+
         out = self.model.forward(batch)
 
         with torch.no_grad():
@@ -82,8 +86,7 @@ class SchNetModelWrapper(PLModelWrapper):
         return {
             'representations': representations,
             'representations_splits': batch['_n_atoms'].detach().cpu().numpy().tolist(),
-            # 'representations_energy': batch_dict[AtomicDataDict.TOTAL_ENERGY_KEY],
-            'representations_energy': batch['energy'],
+            'representations_energy': true_eng,
         }
 
 
