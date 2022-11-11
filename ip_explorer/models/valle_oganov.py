@@ -18,9 +18,9 @@ class ValleOganovModelWrapper(PLModelWrapper):
         self.elements = ast.literal_eval(kwargs['elements'])
 
         if 'pad_atoms' not in kwargs:
-            raise RuntimeError("Must specify pad_atoms for ValleOganov. Use --additional-kwargs argument.")
-
-        self.pad_atoms = ast.literal_eval(kwargs['pad_atoms'])
+            self.pad_atoms = False
+        else:
+            self.pad_atoms = ast.literal_eval(kwargs['pad_atoms'])
 
         super().__init__(model_dir=model_dir, **kwargs)
 
@@ -65,7 +65,7 @@ class ValleOganovModelWrapper(PLModelWrapper):
             representations.append(v.tile((natoms, 1)))
 
             splits.append(natoms)
-            energies.append(atoms.info['energy'])#/natoms)
+            energies.append(atoms.info['energy']/natoms)
 
         representations = torch.cat(representations, dim=0)
         energies        = torch.Tensor(energies)
