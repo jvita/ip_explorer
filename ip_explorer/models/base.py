@@ -160,14 +160,24 @@ class PLModelWrapper(pl.LightningModule):
         """
 
         # compute_loss MUST return the MSE or MAE so weighted aggregation is correct
-        n_e_tot = sum([s['batch_size'] for s in step_outputs])
-        n_f_tot = sum([s['natoms'] for s in step_outputs])
+        e_rmse = torch.Tensor([s['energy']*s['batch_size'] for s in step_outputs])
+        f_rmse = torch.Tensor([s['force']*s['natoms'] for s in step_outputs])
 
-        e_rmse = np.sqrt(np.sum(([s['energy']*s['batch_size'] for s in step_outputs]))/n_e_tot)
-        f_rmse = np.sqrt(np.sum(([s['force']*s['natoms'] for s in step_outputs]))/n_f_tot)
+        # Cast to int in case a length (1,) array was returned instead
+        batch_sizes = sum([int(s['batch_size']) for s in step_outputs])
+        natoms      = sum([int(s['natoms']) for s in step_outputs])
 
-        e_rmse = np.average(self.all_gather(e_rmse).detach().cpu().numpy())
-        f_rmse = np.average(self.all_gather(f_rmse).detach().cpu().numpy())
+        e_rmse = self.all_gather(e_rmse)
+        f_rmse = self.all_gather(f_rmse)
+
+        batch_sizes = self.all_gather(batch_sizes)
+        natoms      = self.all_gather(natoms)
+
+        n_e_tot = batch_sizes.sum()
+        n_f_tot = natoms.sum()
+
+        e_rmse = np.sqrt((e_rmse/n_e_tot).sum().detach().cpu().numpy())
+        f_rmse = np.sqrt((f_rmse/n_f_tot).sum().detach().cpu().numpy())
 
         self.results['e_rmse'] = e_rmse
         self.results['f_rmse'] = f_rmse
