@@ -14,9 +14,14 @@ class VGOPModelWrapper(PLModelWrapper):
         """
         Arguments:
 
-            cutoffs (list):
-                A list of radial cutoffs. Graphs will be constructed at each
-                cutoff distance.
+            min_cut (float):
+                The smallest cutoff distance to use
+
+            max_cut (float):
+                The largest cutoff distance to use
+
+            num_cutoffs (int):
+                The number of cutoffs to use
 
             elements (list):
                 A list of element types
@@ -26,13 +31,21 @@ class VGOPModelWrapper(PLModelWrapper):
                 interaction type. Example: `[(0, 0), (0, 1), (1, 1)]`. If 'all',
                 will use all possible interaction types based on `elements`.
         """
-        if 'cutoffs' not in kwargs:
-            raise RuntimeError("Must specify cutoff distances for VGOP. Use --additional-kwargs argument.")
+        if 'min_cut' not in kwargs:
+            raise RuntimeError("Must specify min_cut for VGOP. Use --additional-kwargs argument.")
+        if 'max_cut' not in kwargs:
+            raise RuntimeError("Must specify max_cut for VGOP. Use --additional-kwargs argument.")
+        if 'num_cutoffs' not in kwargs:
+            raise RuntimeError("Must specify num_cutoffs distances for VGOP. Use --additional-kwargs argument.")
 
-        self.cutoffs = ast.literal_eval(kwargs['cutoffs'])
+        self.cutoffs = np.linspace(
+            ast.literal_eval(kwargs['min_cut']),
+            ast.literal_eval(kwargs['max_cut']),
+            ast.literal_eval(kwargs['num_cutoffs'])
+        )
 
         if 'elements' not in kwargs:
-            raise RuntimeError("Must specify elements for ValleOganov. Use --additional-kwargs argument.")
+            raise RuntimeError("Must specify elements for VGOP. Use --additional-kwargs argument.")
 
         self.elements = ast.literal_eval(kwargs['elements'])
 
@@ -48,9 +61,9 @@ class VGOPModelWrapper(PLModelWrapper):
             ))  # for all bond types
 
         if 'pad_atoms' not in kwargs:
-            raise RuntimeError("Must specify pad_atoms for ValleOganov. Use --additional-kwargs argument.")
-
-        self.pad_atoms = ast.literal_eval(kwargs['pad_atoms'])
+            self.pad_atoms = False
+        else:
+            self.pad_atoms = ast.literal_eval(kwargs['pad_atoms'])
 
         if 'take_chemical' not in kwargs:
             self.take_chemical = False
@@ -92,7 +105,7 @@ class VGOPModelWrapper(PLModelWrapper):
             natoms = len(atoms)
 
             if self.pad_atoms:
-                atoms.center(vacuum=2*max(self.cutoffs))
+                atoms.center(vacuum=2*np.max(self.cutoffs))
                 atoms.pbc = True
 
             v = torch.from_numpy(self.model(atoms))
@@ -194,7 +207,8 @@ class VGOPModel:
             probs.append(float(count) / float(total_nodes))
 
         for j,prob in enumerate(probs):
-            op += prob*math.log(prob) + prob*vals[j]
+            # Use masked array for safe log
+            op += prob*np.ma.log(np.atleast_1d(prob)).filled(0) + prob*vals[j]
         op = op**3
 
         return op
@@ -242,4 +256,5 @@ class VGOPModel:
                     if self.take_radial:
                         theta.append(radial_graph_op)
 
-        return np.array(theta)
+        theta = np.array(theta)
+        return theta[:, 0]
