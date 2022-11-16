@@ -55,6 +55,14 @@ class NequIPModelWrapper(PLModelWrapper):
 
         self.metrics = metrics
 
+    def random_model(self, traindir):
+        config = Config.from_file(traindir + "/config.yaml")
+
+        return model_from_config(
+            config=config,
+            initialize=False,
+        )
+
 
     def compute_loss(self, batch):
         self.metrics.reset()

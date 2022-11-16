@@ -106,6 +106,14 @@ class PLModelWrapper(pl.LightningModule):
         raise NotImplementedError
 
 
+    def random_model(self):
+        """
+        Returns a model with parameters that have been randomly initialized
+        in a manner similar to what would have been used during training.
+        """
+        raise NotImplementedError
+
+
     def compute_loss(self, batch):
         """
         A function for computing the energy and force MSE of the model. This
@@ -269,4 +277,3 @@ class PLModelWrapper(pl.LightningModule):
 
         """
         raise NotImplementedError
-

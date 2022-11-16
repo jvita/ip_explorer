@@ -18,13 +18,13 @@ class MACEModelWrapper(PLModelWrapper):
             model_dir (str):
                 The path to a folder containing the following files:
 
-                    * 'template.model': a model template that can be loaded
+                    * 'results/template.model': a model template that can be loaded
                     using `torch.load`; intended as a workaround for having to
                     call the model constructor with all hyperparameters. Note
                     that the mace/scripts/run_train.py script may have needed to
                     have been modified to save this template at the beginning of
                     training.
-                    * '*epoch-*.pt' checkpoints with the "model" key; used for loading
+                    * 'results/*epoch-*.pt' checkpoints with the "model" key; used for loading
                     the state dict of a trained model
         """
         if 'representation_type' in kwargs:
@@ -37,10 +37,10 @@ class MACEModelWrapper(PLModelWrapper):
 
 
     def load_model(self, model_path):
-        self.model = torch.load(os.path.join(model_path, 'template.model'))
+        self.model = torch.load(os.path.join(model_path, 'checkpoints', 'template.model'))
 
         # For handling the possible existence of multiple checkpoints
-        checkpoint_files = glob.glob(os.path.join(model_path, '*.pt'))
+        checkpoint_files = glob.glob(os.path.join(model_path, 'checkpoints', '*.pt'))
         checkpoint_epochs = [
             int(path.split('epoch-')[-1].split('.pt')[0])
             for path in checkpoint_files
@@ -53,6 +53,9 @@ class MACEModelWrapper(PLModelWrapper):
         if 'structure_representations' in self.values_to_compute:
             self._node_representations = []
             self._register_representations_hook()
+
+    def random_model(self, model_path):
+        return torch.load(os.path.join(model_path, 'checkpoints', 'template.model'))
 
 
     def compute_loss(self, batch):
@@ -131,15 +134,12 @@ class MACEModelWrapper(PLModelWrapper):
 
     def copy(self, model_path):
 
-        os.path.join(model_path, 'template.model')
-
-
         shutil.copyfile(
-            os.path.join(model_path,  'template.model'),
+            os.path.join(model_path,  'checkpoints/template.model'),
             os.path.join(os.getcwd(), 'template.model')
         )
 
-        checkpoint_files = glob.glob(os.path.join(model_path, '*.pt'))
+        checkpoint_files = glob.glob(os.path.join(model_path, 'checkpoints/*.pt'))
         checkpoint_epochs = [
             int(path.split('epoch-')[-1].split('.pt')[0])
             for path in checkpoint_files
@@ -149,6 +149,6 @@ class MACEModelWrapper(PLModelWrapper):
         best_file = os.path.split(best_file)[-1]
 
         shutil.copyfile(
-            os.path.join(model_path,  best_file),
+            os.path.join(model_path,  'checkpoints/'+best_file),
             os.path.join(os.getcwd(), best_file)
         )
