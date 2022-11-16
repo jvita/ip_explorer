@@ -17,7 +17,7 @@ import argparse
 import numpy as np
 
 from ase import Atoms
-from ase.io import write
+from ase.io import write, read
 
 import pytorch_lightning as pl
 
@@ -52,6 +52,7 @@ parser.add_argument( '--batch-size', type=int, help='Batch size for data loaders
 parser.add_argument( '--slice', type=int, help='Step size to use when reducing data size via slicing', default=1, dest='slice', required=False,)
 
 parser.add_argument( '--additional-kwargs', type=str, help='A string of additional key-value argument pairs that will be passed to the model and datamodule wrappers. Format: "key1:value1 key2:value2"', dest='additional_kwargs', required=False, default='') 
+parser.add_argument( '--vgop-load-file', type=str, help='The path to an ASE XYZ file containing the computed VGOP descriptors and corresponding DFT energies', dest='vgop_load_file', required=False) 
 parser.add_argument( '--vgop-kwargs', type=str, help='A string of key-value pairs that will be passed to the VGOP model and datamodule wrappers. Format: "key1:value1 key2:value2"', dest='vgop_kwargs', required=False, default='') 
 
 args = parser.parse_args()
@@ -85,27 +86,28 @@ def main():
         k, v = kv_pair.split(':')
         additional_kwargs[k] = v
 
-    vgop_kwargs = {}
-    for kv_pair in args.vgop_kwargs.split():
-        k, v = kv_pair.split(':')
-        vgop_kwargs[k] = v
+    if args.vgop_load_file is None:  # VGOP should be re-computed
+        vgop_kwargs = {}
+        for kv_pair in args.vgop_kwargs.split():
+            k, v = kv_pair.split(':')
+            vgop_kwargs[k] = v
 
-    # Load VGOP model
-    vgop = get_model_wrapper('vgop')(
-        model_dir=None,
-        values_to_compute=('structure_representations',),
-        copy_to_cwd=False,
-        **vgop_kwargs,
-    )
+        # Load VGOP model
+        vgop = get_model_wrapper('vgop')(
+            model_dir=None,
+            values_to_compute=('structure_representations',),
+            copy_to_cwd=False,
+            **vgop_kwargs,
+        )
 
-    vgop.eval()
+        vgop.eval()
 
-    vgop_datamodule = get_datamodule_wrapper('vgop')(
-        args.database_path,
-        batch_size=args.batch_size,
-        num_workers=int(np.floor(int(os.environ['LSB_MAX_NUM_PROCESSORS'])/int(os.environ['GPUS_PER_NODE']))),
-        **vgop_kwargs,
-    )
+        vgop_datamodule = get_datamodule_wrapper('vgop')(
+            args.database_path,
+            batch_size=args.batch_size,
+            num_workers=int(np.floor(int(os.environ['LSB_MAX_NUM_PROCESSORS'])/int(os.environ['GPUS_PER_NODE']))),
+            **vgop_kwargs,
+        )
 
 
     # Load learned model
@@ -133,21 +135,86 @@ def main():
         # enable_progress_bar=False,
     )
 
-    trainer.test(vgop, dataloaders=vgop_datamodule.train_dataloader())
-    original = vgop.results['representations'].detach().cpu().numpy()
-    original_eng = vgop.results['representations_energies'].detach().cpu().numpy()
+    if args.vgop_load_file is None:
+        trainer.test(vgop, dataloaders=vgop_datamodule.train_dataloader())
+        original = vgop.results['representations'].detach().cpu().numpy()
+        original_eng = vgop.results['representations_energies'].detach().cpu().numpy()
+
+    else:
+        images = read(args.vgop_load_file, format='extxyz', index=':')
+        original = np.stack([
+            atoms.info['SOAP-n8-l4-c2.4-g0.3'] for atoms in images
+        ])
+        original_eng = np.array([
+            atoms.info['energy'] for atoms in images
+        ])
+
     print('VGOP REPRESENTATIONS SHAPE:', original.shape)
 
     trainer.test(model, dataloaders=model_datamodule.train_dataloader())
     learned = model.results['representations'].detach().cpu().numpy()
     learned_eng = model.results['representations_energies'].detach().cpu().numpy()
-    print('MODEL REPRESENTATIONS SHAPE:', learned.shape)
 
-    nsamples = original.shape[0]
+    print('MODEL REPRESENTATIONS SHAPE:', learned.shape)
 
     # Sort by energy to try to deal with the fact that orders will be wrong
     original = original[np.argsort(original_eng)]
+    original_eng = original_eng[np.argsort(original_eng)]
+
     learned = learned[np.argsort(learned_eng)]
+    learned_eng = learned_eng[np.argsort(learned_eng)]
+
+    # Save results for reproducibility
+
+    images = []
+    for i, (v, e) in enumerate(zip(original, original_eng)):
+        atoms  =  Atoms(
+            'H',
+            positions=[[0,0,0]],
+            cell=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        )
+
+        # SHEAP searches for "energy"
+        atoms.info['energy'] = e
+
+        # SHEAP searches for "SOAP*" keys
+        atoms.info['SOAP-n8-l4-c2.4-g0.3'] = v
+
+        # Filler information for SHEAP testing
+        atoms.info['name'] = str(i)
+        atoms.info['pressure']    = 0.0
+        atoms.info['spacegroup']  = 'unknown'
+        atoms.info['times_found'] = 1
+
+        images.append(atoms)
+
+    write(os.path.join(args.save_dir, args.prefix+'vgop-representations.xyz'), images, format='extxyz')
+
+    images = []
+    for i, (v, e) in enumerate(zip(learned, learned_eng)):
+        atoms  =  Atoms(
+            'H',
+            positions=[[0,0,0]],
+            cell=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        )
+
+        # SHEAP searches for "energy"
+        atoms.info['energy'] = e
+
+        # SHEAP searches for "SOAP*" keys
+        atoms.info['SOAP-n8-l4-c2.4-g0.3'] = v
+
+        # Filler information for SHEAP testing
+        atoms.info['name'] = str(i)
+        atoms.info['pressure']    = 0.0
+        atoms.info['spacegroup']  = 'unknown'
+        atoms.info['times_found'] = 1
+
+        images.append(atoms)
+
+    write(os.path.join(args.save_dir, args.prefix+'model-representations.xyz'), images, format='extxyz')
+
+    nsamples = original.shape[0]
 
     original_metric = MetricComparisons(original)
     learned_metric  = MetricComparisons(learned)
@@ -177,10 +244,13 @@ def main():
 
     ax.legend()
 
-    ax.set_title("Information imbalance", fontsize=18, pad=20)
+    # ax.set_title("Information imbalance", fontsize=19, pad=20)
+    ax.set_title(r"$\Delta(A \rightarrow B$):""\n""information that $A$ lacks about $B$", fontsize=18, pad=20)
 
-    ax.set_ylabel(r"$\Delta($VGOP $\rightarrow$ model$) $", fontsize=14)
+    # (float, float): the information imbalance from 'full' to 'alternative'
+    # and vice versa
     ax.set_xlabel(r"$\Delta($VGOP $\rightarrow$ model$) $", fontsize=14)
+    ax.set_ylabel(r"$\Delta($model $\rightarrow$ VGOP$) $", fontsize=14)
 
     plt.savefig(
         os.path.join(args.save_dir, args.prefix+'information-imbalance.png'),
