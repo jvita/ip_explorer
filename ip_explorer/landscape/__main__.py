@@ -56,6 +56,7 @@ parser.add_argument( '--model-type', type=str, help='Type of model being used.  
 parser.add_argument( '--database-path', type=str, help='Path to formatted schnetpack.data.ASEAtomsData database', dest='database_path', required=True)
 parser.add_argument( '--model-path', type=str, help='Full path to model checkpoint file', dest='model_path', required=True,) 
 
+parser.add_argument( '--landscape-type', type=str, help='Type of landscape to generate', dest='landscape_type', required=True, choices=['lines', 'plane'])
 parser.add_argument( '--compute-initial-losses', help='Computes and logs the train/test/val losses of the inital model', action='store_true')
 parser.add_argument( '--no-compute-initial-losses', action='store_false', dest='compute_initial_losses')
 parser.set_defaults(compute_initial_losses=True)
@@ -65,6 +66,7 @@ parser.add_argument( '--batch-size', type=int, help='Batch size for data loaders
 parser.add_argument( '--loss-type', type=str, help='"energy", "force" or None', dest='loss_type', default=None, required=False,) 
 parser.add_argument( '--distance', type=float, help='Fractional distance in parameterspace', dest='distance') 
 parser.add_argument( '--steps', type=int, help='Number of grid steps in each direction in parameter space', dest='steps', required=True,) 
+parser.add_argument( '--n-lines', type=int, help='Number of lines to evaluate if `landscape-type=="lines"`. Default is same as `steps`', dest='n_lines') 
 
 parser.add_argument( '--additional-kwargs', type=str, help='A string of additional key-value argument pairs that will be passed to the model and datamodule wrappers. Format: "key1:value1 key2:value2"', dest='additional_kwargs', required=False, default='') 
 
@@ -101,6 +103,10 @@ def main():
     rank = comm.Get_rank()
 
     # Setup
+    if args.landscape_type == 'lines':
+        if args.n_lines is None:
+            args.n_lines = args.steps
+
     if rank == 0:
         if not os.path.isdir(args.save_dir):
             os.makedirs(args.save_dir)
@@ -215,22 +221,41 @@ def main():
         data_loader=datamodule.train_dataloader()
     )
 
-    loss_data_fin = loss_landscapes.random_plane(
-        model_final,
-        metric,
-        distance=distance,     # maximum (normalized) distance in parameter space
-        steps=args.steps,           # number of steps
-        normalization='filter',
-        deepcopy_model=False,
-        n_loss_terms=2,
-    )
+    if args.landscape_type == 'lines':
+        loss_data_fin = loss_landscapes.random_line(
+            model_final,
+            metric,
+            n_lines=args.n_lines,
+            distance=distance,     # maximum (normalized) distance in parameter space
+            steps=args.steps,           # number of steps
+            normalization='filter',
+            deepcopy_model=False,
+            n_loss_terms=2,
+        )
+
+        loss_data_fin = np.transpose(loss_data_fin, axes=(2,0,1))
+
+    elif args.landscape_type == 'plane':
+        loss_data_fin = loss_landscapes.random_plane(
+            model_final,
+            metric,
+            distance=distance,     # maximum (normalized) distance in parameter space
+            steps=args.steps,           # number of steps
+            normalization='filter',
+            deepcopy_model=False,
+            n_loss_terms=2,
+        )
 
     if rank == 0:
-        save_name = 'L={}_d={:.2f}_s={}_'.format('energy', distance, args.steps)
+        save_name = '{}={}_d={:.2f}_s={}_'.format(args.landscape_type, 'energy', distance, args.steps)
+        if args.landscape_type == 'lines':
+            save_name += f'{args.n_lines}_'
         full_path = os.path.join(args.save_dir, args.prefix+save_name+args.model_type)
         np.save(full_path, loss_data_fin[0])
 
-        save_name = 'L={}_d={:.2f}_s={}_'.format('forces', distance, args.steps)
+        save_name = '{}={}_d={:.2f}_s={}_'.format(args.landscape_type, 'forces', distance, args.steps)
+        if args.landscape_type == 'lines':
+            save_name += f'{args.n_lines}_'
         full_path = os.path.join(args.save_dir, args.prefix+save_name+args.model_type)
         np.save(full_path, loss_data_fin[1])
 
