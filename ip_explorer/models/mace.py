@@ -92,7 +92,7 @@ class MACEModelWrapper(PLModelWrapper):
             module.register_forward_pre_hook(hook)
 
 
-    def compute_structure_representations(self, batch):
+    def compute_atom_representations(self, batch):
         out = self.model.forward(batch)
 
         with torch.no_grad():
@@ -124,10 +124,15 @@ class MACEModelWrapper(PLModelWrapper):
         representations = torch.cat(representations, dim=1)
         splits = torch.unique(batch.batch, return_counts=True)[1]
 
+        per_atom_energies = batch.energy/splits
+        per_atom_energies = torch.cat([
+            torch.ones(n)*e for n,e in zip(splits, per_atom_energies)
+        ])
+
         return {
             'representations': representations,
             'representations_splits': splits.detach().cpu().numpy().tolist(),
-            'representations_energy': batch.energy/splits,
+            'representations_energy': per_atom_energies,
         }
 
 

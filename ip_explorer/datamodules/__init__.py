@@ -16,6 +16,7 @@ implemented_datamodules = {
     'mace':         MACEDataModule,
     'valle-oganov': ASEDataModule,
     'vgop':         ASEDataModule,
+    'soap':         ASEDataModule,
 }
 
 def get_datamodule_wrapper(datamodule_type):

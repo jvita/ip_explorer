@@ -42,7 +42,7 @@ class NequIPModelWrapper(PLModelWrapper):
             traindir=traindir, model_name='best_model.pth'
         )
 
-        if 'structure_representations' in self.values_to_compute:
+        if ('structure_representations' in self.values_to_compute) or ('structure_representations' in self.values_to_compute):
             self._register_representations_hook()
 
         metrics_components = config.get("metrics_components", None)
@@ -102,7 +102,7 @@ class NequIPModelWrapper(PLModelWrapper):
                 module.register_forward_pre_hook(hook)
 
 
-    def compute_structure_representations(self, batch):
+    def compute_atom_representations(self, batch):
         batch_dict = AtomicData.to_AtomicDataDict(batch)
 
         out = self.model.forward(batch_dict)
@@ -128,10 +128,15 @@ class NequIPModelWrapper(PLModelWrapper):
         per_atom_representations = torch.cat(per_atom_representations, dim=1)
         splits = torch.unique(out['batch'], return_counts=True)[1]
 
+        per_atom_energies = batch_dict[AtomicDataDict.TOTAL_ENERGY_KEY]/splits[:, None]
+        per_atom_energies = torch.cat([
+            torch.ones(n)*e for n,e in zip(splits, per_atom_energies)
+        ])
+
         return {
             'representations': per_atom_representations,
             'representations_splits': splits.detach().cpu().numpy().tolist(),
-            'representations_energy': batch_dict[AtomicDataDict.TOTAL_ENERGY_KEY]/splits[:, None],
+            'representations_energy': per_atom_energies,
         }
 
 

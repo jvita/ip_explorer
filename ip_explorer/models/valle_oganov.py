@@ -62,17 +62,18 @@ class ValleOganovModelWrapper(PLModelWrapper):
 
             v = torch.from_numpy(self.model.create(atoms))
 
-            representations.append(v.tile((natoms, 1)))
+            representations.append(v)
+            # representations.append(v.tile((natoms, 1)))
 
             splits.append(natoms)
             energies.append(atoms.info['energy']/natoms)
 
-        representations = torch.cat(representations, dim=0)
+        # TODO: make sure .stack() didn't mess up the dimensions
+        representations = torch.stack(representations, dim=0)
         energies        = torch.Tensor(energies)
 
         return {
             'representations': representations,
-            'representations_splits': splits,
             'representations_energy': energies,
         }
 

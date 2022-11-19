@@ -54,7 +54,7 @@ class ACEModelWrapper(PLModelWrapper):
         }
 
 
-    def compute_structure_representations(self, batch):
+    def compute_atom_representations(self, batch):
         raise NotImplementedError
 
         out = self.model.forward(batch)

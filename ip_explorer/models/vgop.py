@@ -6,6 +6,7 @@ import torch
 import numpy as np
 import networkx as nx
 from ase import neighborlist
+from matscipy.neighbours import neighbour_list
 from itertools import combinations_with_replacement
 
 
@@ -92,7 +93,7 @@ class VGOPModelWrapper(PLModelWrapper):
     def compute_structure_representations(self, batch):
         """
         Assumes that 'batch' is just a list of ASE Atoms objects with supercell
-        energies stored under the `atoms.info['energy']` field
+        energies stored under the `atoms.info['energy']` field.
         """
 
         representations = []
@@ -120,7 +121,6 @@ class VGOPModelWrapper(PLModelWrapper):
 
         return {
             'representations': representations,
-            'representations_splits': splits,
             'representations_energy': energies,
         }
 
@@ -184,15 +184,25 @@ class VGOPModel:
         nx.draw(g, node_color=color_map, edge_color='lightsteelblue', width=1, edgecolors='k', alpha=0.75)
         plt.show()
 
+    # @staticmethod
+    # def create_graph(a,nls):
+    #     gr = nx.Graph()
+    #     for i in range(len(a)):
+    #         gr.add_node(i)
+    #     for i in range(len(a)):
+    #         neighs = nls.get_neighbors(i)[0]
+    #         for neigh in neighs:
+    #             gr.add_edge(i,neigh)
+
+    #     return gr
+
     @staticmethod
-    def create_graph(a,nls):
+    def create_graph(a, idx_i, idx_j):
         gr = nx.Graph()
         for i in range(len(a)):
             gr.add_node(i)
-        for i in range(len(a)):
-            neighs = nls.get_neighbors(i)[0]
-            for neigh in neighs:
-                gr.add_edge(i,neigh)
+        for i,j in zip(idx_i, idx_j):
+            gr.add_edge(i, j)
 
         return gr
 
@@ -232,9 +242,11 @@ class VGOPModel:
                     n = []
                     for atom in copy_atoms:
                         n.append(cut)
-                    nl = neighborlist.NeighborList(n, skin=0, self_interaction=False, bothways=True)
-                    nl.update(copy_atoms)
-                    graph = self.create_graph(copy_atoms, nl)
+                    # nl = neighborlist.NeighborList(n, skin=0, self_interaction=False, bothways=True)
+                    # nl.update(copy_atoms)
+                    # graph = self.create_graph(copy_atoms, nl)
+                    idx_i, idx_j = neighbour_list('ij', copy_atoms, cut)
+                    graph = self.create_graph(copy_atoms, idx_i, idx_j)
                     subgraphs = list(nx.connected_components(graph))
                     # if visualize_graphs:
                     #     if i == 0:

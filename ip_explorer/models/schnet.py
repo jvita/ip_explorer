@@ -51,7 +51,7 @@ class SchNetModelWrapper(PLModelWrapper):
         }
 
 
-    def compute_structure_representations(self, batch):
+    def compute_atom_representations(self, batch):
 
         # remember: .forward() overwrites the ['energy'] key
         true_eng = (batch['energy']/batch['_n_atoms']).clone()
@@ -82,6 +82,11 @@ class SchNetModelWrapper(PLModelWrapper):
                 representations.append(z)
 
         representations = torch.cat(representations, dim=1)
+
+        true_eng = (batch['energy']/batch['_n_atoms']).clone()
+        per_atom_energies = torch.cat([
+            torch.ones(n)*e for n,e in zip(batch['_n_atoms'], true_eng)
+        ])
 
         return {
             'representations': representations,

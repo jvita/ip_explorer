@@ -192,22 +192,46 @@ class PLModelWrapper(pl.LightningModule):
 
 
     def compute_structure_representations(self, batch):
+
+        retvals = self.compute_atom_representations(batch)
+
+        representations = [
+            torch.mean(_, dim=0)
+            for _ in torch.split(
+                retvals['representations'], retvals['representations_splits']
+            )
+        ]
+
+        energies = [
+            torch.sum(_, dim=0)
+            for _ in torch.split(
+                retvals['representations_energy'],
+                retvals['representations_splits']
+            )
+        ]
+
+        return {
+            'representations': representations,
+            'representations_splits': splits,
+            'representations_energy': energies,
+        }
+
+    def compute_atom_representations(self, batch):
         raise NotImplementedError
 
-
     def aggregate_structure_representations(self, step_outputs):
+        """
+        Expects that step_outputs returns a dictionary with the following
+        key-value pairs:
+
+            * 'representations': (N, *) array where N is the number of structures
+            * 'representations_energy': (N,) array where N is the number of structures
+        """
         # On each worker, compute the per-structure average representations
         per_struct_representations  = []
         per_struct_energies         = []
         for s in step_outputs:
-            per_struct_representations += [
-                torch.mean(split, dim=0)
-                for split in torch.split(
-                    s['representations'],
-                    s['representations_splits']
-                )
-            ]
-
+            per_struct_representations.append(s['representations'])
             per_struct_energies.append(s['representations_energy'])
 
         per_struct_representations = torch.vstack(per_struct_representations)
@@ -231,6 +255,37 @@ class PLModelWrapper(pl.LightningModule):
 
         self.results['representations'] = per_struct_representations
         self.results['representations_energies'] = per_struct_energies
+
+
+    def aggregate_atom_representations(self, step_outputs):
+        # On each worker, compute the per-structure average representations
+        per_atom_representations  = []
+        per_atom_energies         = []
+        for s in step_outputs:
+            per_atom_representations.append(s['representations'])
+            per_atom_energies.append(s['representations_energy'])
+
+        per_atom_representations = torch.vstack(per_atom_representations)
+        per_atom_energies        = torch.cat(per_atom_energies)
+
+        # Now gather everything
+        per_atom_representations = self.all_gather(per_atom_representations)
+        per_atom_energies = self.all_gather(per_atom_energies)
+
+        # Reshape to remove the num_processes dimension.
+        # NOTE: order is likely not going to match dataloader order
+        per_atom_representations = torch.flatten(
+            per_atom_representations, 0, 1
+        )
+        per_atom_energies = torch.flatten(per_atom_energies, 0, 1)
+
+        n_reps = per_atom_representations.shape[0]
+        n_engs = per_atom_energies.shape[0]
+
+        assert n_reps == n_engs, "Incompatible shapes: {} representations, {} atoms".format(n_reps, n_engs)
+
+        self.results['representations'] = per_atom_representations
+        self.results['representations_energies'] = per_atom_energies
 
 
     def on_test_epoch_start(self):

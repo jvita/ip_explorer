@@ -5,6 +5,7 @@ from .mace import MACEModelWrapper
 from .valle_oganov import ValleOganovModelWrapper
 from .vgop import VGOPModelWrapper
 from .test import TestModelWrapper
+from .soap import SOAPModelWrapper
 
 implemented_wrappers = {
     'test':         TestModelWrapper,
@@ -16,6 +17,7 @@ implemented_wrappers = {
     'mace':         MACEModelWrapper,
     'valle-oganov': ValleOganovModelWrapper,
     'vgop':         VGOPModelWrapper,
+    'soap':         SOAPModelWrapper,
 }
 
 def get_model_wrapper(model_type):
