@@ -88,7 +88,7 @@ def main():
 
     model = get_model_wrapper(args.model_type)(
         model_dir=args.model_path,
-        values_to_compute=('structure_representations',),
+        values_to_compute=('atom_representations',),
         copy_to_cwd=True,
         **additional_kwargs,
     )
