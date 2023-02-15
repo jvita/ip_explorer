@@ -44,6 +44,7 @@ parser.add_argument( '--overwrite', help='Allows save_directory to be overwritte
 parser.add_argument( '--no-ovewrite', action='store_false', dest='overwrite')
 parser.set_defaults(overwrite=False)
 
+parser.add_argument( '--model-load-file', type=str, help='The path to an ASE XYZ file containing the computed model descriptors and corresponding DFT energies', dest='model_load_file', required=False) 
 parser.add_argument( '--model-type', type=str, help='Type of model being used.  Must be one of the supported types from ip_explorer', dest='model_type', required=True)
 parser.add_argument( '--database-path', type=str, help='Path to formatted schnetpack.data.ASEAtomsData database', dest='database_path', required=True)
 parser.add_argument( '--model-path', type=str, help='Full path to model checkpoint file', dest='model_path', default='.') 
@@ -52,8 +53,9 @@ parser.add_argument( '--batch-size', type=int, help='Batch size for data loaders
 parser.add_argument( '--slice', type=int, help='Step size to use when reducing data size via slicing', default=1, dest='slice', required=False,)
 
 parser.add_argument( '--additional-kwargs', type=str, help='A string of additional key-value argument pairs that will be passed to the model and datamodule wrappers. Format: "key1:value1 key2:value2"', dest='additional_kwargs', required=False, default='') 
-parser.add_argument( '--vgop-load-file', type=str, help='The path to an ASE XYZ file containing the computed VGOP descriptors and corresponding DFT energies', dest='vgop_load_file', required=False) 
-parser.add_argument( '--vgop-kwargs', type=str, help='A string of key-value pairs that will be passed to the VGOP model and datamodule wrappers. Format: "key1:value1 key2:value2"', dest='vgop_kwargs', required=False, default='') 
+parser.add_argument( '--baseline-load-file', type=str, help='The path to an ASE XYZ file containing the computed baseline descriptors and corresponding DFT energies', dest='baseline_load_file', required=False) 
+parser.add_argument( '--baseline-model-type', type=str, help='Type of model to use for baseline representation space', dest='baseline_model_type', required=True)
+parser.add_argument( '--baseline-kwargs', type=str, help='A string of key-value pairs that will be passed to the baseline model and datamodule wrappers. Format: "key1:value1 key2:value2"', dest='baseline_kwargs', required=False, default='') 
 
 args = parser.parse_args()
 
@@ -86,34 +88,34 @@ def main():
         k, v = kv_pair.split(':')
         additional_kwargs[k] = v
 
-    if args.vgop_load_file is None:  # VGOP should be re-computed
-        vgop_kwargs = {}
-        for kv_pair in args.vgop_kwargs.split():
+    if args.baseline_load_file is None:  # baseline should be re-computed
+        baseline_kwargs = {}
+        for kv_pair in args.baseline_kwargs.split():
             k, v = kv_pair.split(':')
-            vgop_kwargs[k] = v
+            baseline_kwargs[k] = v
 
-        # Load VGOP model
-        vgop = get_model_wrapper('vgop')(
+        # Load baseline model
+        baseline = get_model_wrapper(args.baseline_model_type)(
             model_dir=None,
-            values_to_compute=('structure_representations',),
+            values_to_compute=('atom_representations',),
             copy_to_cwd=False,
-            **vgop_kwargs,
+            **baseline_kwargs,
         )
 
-        vgop.eval()
+        baseline.eval()
 
-        vgop_datamodule = get_datamodule_wrapper('vgop')(
+        baseline_datamodule = get_datamodule_wrapper(args.baseline_model_type)(
             args.database_path,
             batch_size=args.batch_size,
             num_workers=int(np.floor(int(os.environ['LSB_MAX_NUM_PROCESSORS'])/int(os.environ['GPUS_PER_NODE']))),
-            **vgop_kwargs,
+            **baseline_kwargs,
         )
 
 
     # Load learned model
     model = get_model_wrapper(args.model_type)(
         model_dir=args.model_path,
-        values_to_compute=('structure_representations',),
+        values_to_compute=('atom_representations',),
         copy_to_cwd=True,
         **additional_kwargs,
     )
@@ -135,27 +137,108 @@ def main():
         # enable_progress_bar=False,
     )
 
-    if args.vgop_load_file is None:
-        trainer.test(vgop, dataloaders=vgop_datamodule.train_dataloader())
-        original = vgop.results['representations'].detach().cpu().numpy()
-        original_eng = vgop.results['representations_energies'].detach().cpu().numpy()
-
+    if args.baseline_load_file is None:
+        trainer.test(baseline, dataloaders=baseline_datamodule.train_dataloader())
+        original = baseline.results['representations'].detach().cpu().numpy()
+        original_eng = baseline.results['representations_energies'].detach().cpu().numpy()
+        original_splits = baseline.results['representations_splits'].detach().cpu().numpy()
     else:
-        images = read(args.vgop_load_file, format='extxyz', index=':')
-        original = np.stack([
-            atoms.info['SOAP-n8-l4-c2.4-g0.3'] for atoms in images
+        images = read(args.baseline_load_file, format='extxyz', index=':')
+        original = np.concatenate([
+            # atoms.info['SOAP-n8-l4-c2.4-g0.3'] for atoms in images
+            atoms.arrays['representations'] for atoms in images
         ])
-        original_eng = np.array([
-            atoms.info['energy'] for atoms in images
+        original_eng = np.concatenate([
+            atoms.arrays['representations_energies'] for atoms in images
         ])
+        original_splits = np.array([len(img) for img in images])
 
-    print('VGOP REPRESENTATIONS SHAPE:', original.shape)
+    print('BASELINE REPRESENTATIONS SHAPE:', original.shape, original_eng.shape)
 
-    trainer.test(model, dataloaders=model_datamodule.train_dataloader())
-    learned = model.results['representations'].detach().cpu().numpy()
-    learned_eng = model.results['representations_energies'].detach().cpu().numpy()
+    if args.model_load_file is None:
+        trainer.test(model, dataloaders=model_datamodule.train_dataloader())
+        learned = model.results['representations'].detach().cpu().numpy()
+        learned_eng = model.results['representations_energies'].detach().cpu().numpy()
+        learned_splits = model.results['representations_splits'].detach().cpu().numpy()
+    else:
+        images = read(args.model_load_file, format='extxyz', index=':')
+        learned = np.concatenate([
+            # atoms.info['SOAP-n8-l4-c2.4-g0.3'] for atoms in images
+            atoms.arrays['representations'] for atoms in images
+        ])
+        learned_eng = np.concatenate([
+            atoms.arrays['representations_energies'] for atoms in images
+        ])
+        learned_splits = np.array([len(img) for img in images])
 
-    print('MODEL REPRESENTATIONS SHAPE:', learned.shape)
+    print('MODEL REPRESENTATIONS SHAPE:', learned.shape, learned_eng.shape)
+
+    # Save representations for reproducibility
+    original_split_cumsum = np.cumsum(original_splits)[:-1].astype(int)
+    learned_split_cumsum = np.cumsum(learned_splits)[:-1].astype(int)
+
+    tmp_original     = np.array_split(original, original_split_cumsum)
+    tmp_original_eng = np.array_split(original_eng, original_split_cumsum)
+
+    tmp_learned     = np.array_split(learned, learned_split_cumsum)
+    tmp_learned_eng = np.array_split(learned_eng, learned_split_cumsum)
+
+    images = []
+    for i, (v, e) in enumerate(zip(tmp_original, tmp_original_eng)):
+        natoms = v.shape[0]
+        atoms  =  Atoms(
+            f'H{natoms}',
+            positions=np.zeros((natoms, 3)),
+            cell=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        )
+
+        atoms.arrays['representations'] = v
+        atoms.arrays['representations_energies'] = e
+
+        # # SHEAP searches for "energy"
+        # atoms.info['energy'] = e
+
+        # # SHEAP searches for "SOAP*" keys
+        # atoms.info['SOAP-n8-l4-c2.4-g0.3'] = v
+
+        # # Filler information for SHEAP testing
+        # atoms.info['name'] = str(i)
+        # atoms.info['pressure']    = 0.0
+        # atoms.info['spacegroup']  = 'unknown'
+        # atoms.info['times_found'] = 1
+
+        images.append(atoms)
+
+    write(os.path.join(args.save_dir, args.prefix+'baseline-representations.xyz'), images, format='extxyz')
+
+    images = []
+    for i, (v, e) in enumerate(zip(tmp_learned, tmp_learned_eng)):
+        natoms = v.shape[0]
+        atoms  =  Atoms(
+            f'H{natoms}',
+            positions=np.zeros((natoms, 3)),
+            cell=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        )
+
+        atoms.arrays['representations'] = v
+        atoms.arrays['representations_energies'] = e
+
+#         # SHEAP searches for "energy"
+#         atoms.info['energy'] = e
+# 
+#         # SHEAP searches for "SOAP*" keys
+#         atoms.info['SOAP-n8-l4-c2.4-g0.3'] = v
+# 
+#         # Filler information for SHEAP testing
+#         atoms.info['name'] = str(i)
+#         atoms.info['pressure']    = 0.0
+#         atoms.info['spacegroup']  = 'unknown'
+#         atoms.info['times_found'] = 1
+
+        images.append(atoms)
+
+    write(os.path.join(args.save_dir, args.prefix+'model-representations.xyz'), images, format='extxyz')
+
 
     # Sort by energy to try to deal with the fact that orders will be wrong
     original = original[np.argsort(original_eng)]
@@ -164,60 +247,11 @@ def main():
     learned = learned[np.argsort(learned_eng)]
     learned_eng = learned_eng[np.argsort(learned_eng)]
 
-    # Save results for reproducibility
+    # Compute information imbalance
+    nsamples = original[::args.slice].shape[0]
 
-    images = []
-    for i, (v, e) in enumerate(zip(original, original_eng)):
-        atoms  =  Atoms(
-            'H',
-            positions=[[0,0,0]],
-            cell=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
-        )
-
-        # SHEAP searches for "energy"
-        atoms.info['energy'] = e
-
-        # SHEAP searches for "SOAP*" keys
-        atoms.info['SOAP-n8-l4-c2.4-g0.3'] = v
-
-        # Filler information for SHEAP testing
-        atoms.info['name'] = str(i)
-        atoms.info['pressure']    = 0.0
-        atoms.info['spacegroup']  = 'unknown'
-        atoms.info['times_found'] = 1
-
-        images.append(atoms)
-
-    write(os.path.join(args.save_dir, args.prefix+'vgop-representations.xyz'), images, format='extxyz')
-
-    images = []
-    for i, (v, e) in enumerate(zip(learned, learned_eng)):
-        atoms  =  Atoms(
-            'H',
-            positions=[[0,0,0]],
-            cell=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
-        )
-
-        # SHEAP searches for "energy"
-        atoms.info['energy'] = e
-
-        # SHEAP searches for "SOAP*" keys
-        atoms.info['SOAP-n8-l4-c2.4-g0.3'] = v
-
-        # Filler information for SHEAP testing
-        atoms.info['name'] = str(i)
-        atoms.info['pressure']    = 0.0
-        atoms.info['spacegroup']  = 'unknown'
-        atoms.info['times_found'] = 1
-
-        images.append(atoms)
-
-    write(os.path.join(args.save_dir, args.prefix+'model-representations.xyz'), images, format='extxyz')
-
-    nsamples = original.shape[0]
-
-    original_metric = MetricComparisons(original)
-    learned_metric  = MetricComparisons(learned)
+    original_metric = MetricComparisons(original[::args.slice])
+    learned_metric  = MetricComparisons(learned[::args.slice])
 
     original_metric.compute_distances(maxk=nsamples-1, metric='euclidean')
     learned_metric.compute_distances(maxk=nsamples-1, metric='euclidean')
@@ -249,8 +283,8 @@ def main():
 
     # (float, float): the information imbalance from 'full' to 'alternative'
     # and vice versa
-    ax.set_xlabel(r"$\Delta($VGOP $\rightarrow$ model$) $", fontsize=14)
-    ax.set_ylabel(r"$\Delta($model $\rightarrow$ VGOP$) $", fontsize=14)
+    ax.set_xlabel(r"$\Delta($"+args.baseline_model_type+r"$\rightarrow$ model$) $", fontsize=14)
+    ax.set_ylabel(r"$\Delta($model $\rightarrow$"+args.baseline_model_type+r"$) $", fontsize=14)
 
     plt.savefig(
         os.path.join(args.save_dir, args.prefix+'information-imbalance.png'),

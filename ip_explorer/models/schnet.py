@@ -50,6 +50,33 @@ class SchNetModelWrapper(PLModelWrapper):
             'natoms': int(sum(batch['_n_atoms']).detach().cpu().numpy()),
         }
 
+    def compute_energies(self, batch):
+        true_eng = batch['energy']/batch['_n_atoms']
+        results = self.model.forward(batch)
+        pred_eng = results['energy']/batch['_n_atoms']
+
+        return {
+            'true_energies': torch.Tensor([true_eng]),
+            'pred_energies': torch.Tensor([pred_eng]),
+        }
+
+
+    def compute_energies_and_forces(self, batch):
+        true_eng = batch['energy']/batch['_n_atoms']
+        true_fcs = batch['forces']
+
+        results = self.model.forward(batch)
+
+        pred_eng = results['energy']/batch['_n_atoms']
+        pred_fcs = results['forces']
+
+        return {
+            'true_energies': torch.Tensor(true_eng),
+            'pred_energies': torch.Tensor(pred_eng),
+            'true_forces': true_fcs,
+            'pred_forces': pred_fcs,
+        }
+
 
     def compute_atom_representations(self, batch):
 
@@ -85,7 +112,7 @@ class SchNetModelWrapper(PLModelWrapper):
 
         true_eng = (batch['energy']/batch['_n_atoms']).clone()
         per_atom_energies = torch.cat([
-            torch.ones(n)*e for n,e in zip(batch['_n_atoms'], true_eng)
+            true_eng.new_ones(n)*e for n,e in zip(batch['_n_atoms'], true_eng)
         ])
 
         return {

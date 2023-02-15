@@ -87,7 +87,7 @@ class SOAPModelWrapper(PLModelWrapper):
             representations.append(torch.from_numpy(self.model.create(atoms)))
 
             splits.append(natoms)
-            energies.append(torch.ones(natoms)*atoms.info['energy'])
+            energies.append(torch.ones(natoms)*atoms.info['energy']/natoms)
 
         representations = torch.cat(representations, dim=0)
         energies        = torch.cat(energies)

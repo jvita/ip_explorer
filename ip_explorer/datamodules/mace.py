@@ -1,6 +1,7 @@
 from .base import PLDataModuleWrapper
 
 import os
+import logging
 import numpy as np
 from ase.io import read
 
@@ -19,12 +20,34 @@ class MACEDataModule(PLDataModuleWrapper):
                     * `train.xyz`: an ASE-readable list of atoms
                     * `test.xyz`: an ASE-readable list of atoms
                     * `val.xyz`: an ASE-readable list of atoms
+
+            train_filename (str, default=None):
+                If provided, used instead of `train.xyz`
+
+            test_filename (str, default=None):
+                If provided, used instead of `train.xyz`
+
+            val_filename (str, default=None):
+                If provided, used instead of `train.xyz`
         """
 
         if 'cutoff' not in kwargs:
-            raise RuntimeError("Must specify cutoff distance for SchNetDataModule. Use --additional-kwargs argument.")
+            raise RuntimeError("Must specify cutoff distance for MACEDataModule.  Use --additional-datamodule-kwargs argument.")
 
         self.cutoff = float(kwargs['cutoff'])
+
+        if 'train_filename' in kwargs:
+            self.train_filename = kwargs['train_filename']
+        else:
+            self.train_filename = 'train.xyz'
+        if 'test_filename' in kwargs:
+            self.test_filename = kwargs['test_filename']
+        else:
+            self.test_filename = 'test.xyz'
+        if 'val_filename' in kwargs:
+            self.val_filename = kwargs['val_filename']
+        else:
+            self.val_filename = 'val.xyz'
 
         super().__init__(stage=stage, **kwargs)
 
@@ -36,20 +59,47 @@ class MACEDataModule(PLDataModuleWrapper):
         __init__()
         """
 
-        train   = config_from_atoms_list(read(os.path.join(stage, 'train.xyz'), format='extxyz', index=':'))
-        test    = config_from_atoms_list(read(os.path.join(stage, 'test.xyz'), format='extxyz', index=':'))
-        val     = config_from_atoms_list(read(os.path.join(stage, 'val.xyz'), format='extxyz', index=':'))
+        train_path = os.path.join(stage, self.train_filename)
+        if os.path.isfile(train_path):
+            train   = config_from_atoms_list(read(os.path.join(stage, self.train_filename), format='extxyz', index=':'))
 
-        z_table = get_atomic_number_table_from_zs(
-            z
-            for configs in (train, test, val)
-            for config in configs
-            for z in config.atomic_numbers
-        )
+            z_table = get_atomic_number_table_from_zs(
+                z
+                for config in train
+                for z in config.atomic_numbers
+            )
 
-        self.train_dataset  = [AtomicData.from_config(c, z_table=z_table, cutoff=self.cutoff) for c in train]
-        self.test_dataset   = [AtomicData.from_config(c, z_table=z_table, cutoff=self.cutoff) for c in test]
-        self.val_dataset    = [AtomicData.from_config(c, z_table=z_table, cutoff=self.cutoff) for c in val]
+            self.train_dataset  = [AtomicData.from_config(c, z_table=z_table, cutoff=self.cutoff) for c in train]
+        else:
+            logging.warning("File '{}' could not be loaded.".format(train_path))
+
+        test_path = os.path.join(stage, self.test_filename)
+        if os.path.isfile(test_path):
+            test   = config_from_atoms_list(read(os.path.join(stage, self.test_filename), format='extxyz', index=':'))
+
+            z_table = get_atomic_number_table_from_zs(
+                z
+                for config in test
+                for z in config.atomic_numbers
+            )
+
+            self.test_dataset   = [AtomicData.from_config(c, z_table=z_table, cutoff=self.cutoff) for c in test]
+        else:
+            logging.warning("File '{}' could not be loaded.".format(test_path))
+
+        val_path = os.path.join(stage, self.val_filename)
+        if os.path.isfile(val_path):
+            val   = config_from_atoms_list(read(os.path.join(stage, self.val_filename), format='extxyz', index=':'))
+
+            z_table = get_atomic_number_table_from_zs(
+                z
+                for config in val
+                for z in config.atomic_numbers
+            )
+
+            self.val_dataset    = [AtomicData.from_config(c, z_table=z_table, cutoff=self.cutoff) for c in val]
+        else:
+            logging.warning("File '{}' could not be loaded.".format(val_path))
 
 
     def get_dataloader(self, dataset):

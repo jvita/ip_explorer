@@ -23,6 +23,20 @@ class NequIPDataModule(PLDataModuleWrapper):
                         'dataset', 'test_dataset', and 'validation_dataset'
                         keys.
         """
+
+        if 'train_filename' in kwargs:
+            self.train_filename = kwargs['train_filename']
+        else:
+            self.train_filename = None
+        if 'test_filename' in kwargs:
+            self.test_filename = kwargs['test_filename']
+        else:
+            self.test_filename = None
+        if 'val_filename' in kwargs:
+            self.val_filename = kwargs['val_filename']
+        else:
+            self.val_filename = None
+
         super().__init__(stage=stage, **kwargs)
 
 
@@ -46,9 +60,22 @@ class NequIPDataModule(PLDataModuleWrapper):
             defaults={"r_max": model_config["r_max"]}
         )
 
-        self.train_dataset  = dataset_from_config(dataset_config, prefix="dataset")
-        self.test_dataset   = dataset_from_config(dataset_config, prefix="test_dataset")
-        self.val_dataset    = dataset_from_config(dataset_config, prefix="validation_dataset")
+        # Check if different filename was given
+        if self.train_filename is not None:
+            dataset_config['dataset_file_name'] = self.train_filename
+        if self.test_filename is not None:
+            dataset_config['test_dataset_file_name'] = self.test_filename
+        if self.val_filename is not None:
+            dataset_config['validation_dataset_file_name'] = self.val_filename
+
+        if 'dataset' in dataset_config:
+            self.train_dataset  = dataset_from_config(dataset_config, prefix="dataset")
+
+        if 'test_dataset' in dataset_config:
+            self.test_dataset   = dataset_from_config(dataset_config, prefix="test_dataset")
+
+        if 'validation_dataset' in dataset_config:
+            self.val_dataset    = dataset_from_config(dataset_config, prefix="validation_dataset")
 
     def get_dataloader(self, dataset):
         return DataLoader(

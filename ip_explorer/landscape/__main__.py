@@ -11,6 +11,7 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 
+import re
 import copy
 import random
 import numpy as np
@@ -28,8 +29,10 @@ import pytorch_lightning as pl
 
 import loss_landscapes
 import loss_landscapes.metrics
-from loss_landscapes.model_interface.model_wrapper import SimpleModelWrapper
+from loss_landscapes.model_interface.model_wrapper import SimpleModelWrapper, ModelWrapper
 from loss_landscapes.model_interface.model_parameters import ModelParameters
+from loss_landscapes.model_interface.torch.torch_wrappers import TorchModelWrapper
+from loss_landscapes.model_interface.model_interface import wrap_model
 
 from ip_explorer.datamodules import get_datamodule_wrapper
 from ip_explorer.models import get_model_wrapper
@@ -55,11 +58,15 @@ parser.set_defaults(overwrite=False)
 parser.add_argument( '--model-type', type=str, help='Type of model being used.  Must be one of the supported types from ip_explorer', dest='model_type', required=True)
 parser.add_argument( '--database-path', type=str, help='Path to formatted schnetpack.data.ASEAtomsData database', dest='database_path', required=True)
 parser.add_argument( '--model-path', type=str, help='Full path to model checkpoint file', dest='model_path', required=True,) 
+parser.add_argument( '--layers-regex', type=str, help='RegEx string for selecting model layers by name', dest='layers_regex', default='.*',) 
 
 parser.add_argument( '--landscape-type', type=str, help='Type of landscape to generate', dest='landscape_type', required=True, choices=['lines', 'plane'])
 parser.add_argument( '--compute-initial-losses', help='Computes and logs the train/test/val losses of the inital model', action='store_true')
 parser.add_argument( '--no-compute-initial-losses', action='store_false', dest='compute_initial_losses')
 parser.set_defaults(compute_initial_losses=True)
+parser.add_argument( '--compute-landscape', help='Computes the loss landscape', action='store_true')
+parser.add_argument( '--no-compute-landscape', action='store_false', dest='compute_landscape')
+parser.set_defaults(compute_landscape=True)
 
 parser.add_argument( '--batch-size', type=int, help='Batch size for data loaders', dest='batch_size', default=128, required=False,)
 
@@ -69,6 +76,7 @@ parser.add_argument( '--steps', type=int, help='Number of grid steps in each dir
 parser.add_argument( '--n-lines', type=int, help='Number of lines to evaluate if `landscape-type=="lines"`. Default is same as `steps`', dest='n_lines') 
 
 parser.add_argument( '--additional-kwargs', type=str, help='A string of additional key-value argument pairs that will be passed to the model and datamodule wrappers. Format: "key1:value1 key2:value2"', dest='additional_kwargs', required=False, default='') 
+parser.add_argument( '--additional-datamodule-kwargs', type=str, help='A string of additional key-value argument pairs that will be passed to the datamodule wrapper. Format: "key1:value1 key2:value2"', dest='additional_datamodule_kwargs', required=False, default='') 
 
 args = parser.parse_args()
 
@@ -120,49 +128,31 @@ def main():
         k, v = kv_pair.split(':')
         additional_kwargs[k] = v
 
+    additional_datamodule_kwargs = {}
+    for kv_pair in args.additional_datamodule_kwargs.split():
+        k, v = kv_pair.split(':')
+        additional_datamodule_kwargs[k] = v
+
     model = get_model_wrapper(args.model_type)(
         model_dir=args.model_path,
         copy_to_cwd=True,
+        values_to_compute=['loss'],
         **additional_kwargs,
     )
 
     model.eval()
-
-    init_model = model.random_model(model_path=args.model_path)
-
-    model_initial = SimpleModelWrapper(init_model)  # needed for loss_landscapes
-    model_final = SimpleModelWrapper(model)  # needed for loss_landscapes
-
-    start_point = copy.deepcopy(model_initial).get_module_parameters()
-    end_point   = copy.deepcopy(model_final).get_module_parameters()
-
-    with torch.no_grad():
-        diff = ModelParameters([
-            # torch.abs(end_point.parameters[i] - start_point.parameters[i])
-            end_point.parameters[i] - start_point.parameters[i]
-            for i in range(len(start_point.parameters))
-        ])
-
-        # Convert distance to units of multiples of model norm magnitude
-        diff.truediv_(start_point.model_norm())
-        # diff.filter_normalize_(end_point)
-
-    if args.distance is not None:
-        distance = args.distance
-    else:
-        distance = 2*diff.model_norm()
-        logging.info(f"Distance not provided. Using 2x distance to random ({distance}).")
 
     datamodule = get_datamodule_wrapper(args.model_type)(
         args.database_path,
         batch_size=args.batch_size,
         # num_workers=int(np.floor(int(os.environ['LSB_MAX_NUM_PROCESSORS'])/int(args.gpus_per_node)/int(args.num_nodes))),
         num_workers=0,
-        **additional_kwargs,
+        **additional_datamodule_kwargs,
     )
 
     if args.compute_initial_losses:
         if rank == 0:
+            model.values_to_compute = ['energies_and_forces']
 
             # TODO: use devices=1 for train/test/val verification to avoid
             # duplicating data, as suggested on this page:
@@ -173,38 +163,108 @@ def main():
                 accelerator='cuda',
             )
 
-            # Compute initial train/val/test losses
-            print('Computing training errors with devices=1 to avoid batch padding errors', flush=True)
-            trainer.test(model, dataloaders=datamodule.train_dataloader())
-            train_eloss, train_floss = model.results['e_rmse'], model.results['f_rmse']
-            print('Computing validation errors with devices=1 to avoid batch padding errors', flush=True)
-            trainer.test(model, dataloaders=datamodule.val_dataloader())
-            val_eloss, val_floss = model.results['e_rmse'], model.results['f_rmse']
-            print('Computing testing errors with devices=1 to avoid batch padding errors', flush=True)
-            trainer.test(model, dataloaders=datamodule.test_dataloader())
-            test_eloss, test_floss = model.results['e_rmse'], model.results['f_rmse']
+            datasets_to_check = {
+                'train': datamodule.train_dataloader(),
+                # 'test': datamodule.test_dataloader(),
+                # 'val': datamodule.val_dataloader(),
+            }
+
+            rmse_values = {}
+
+            for name, dset in datasets_to_check.items():
+
+                # Compute initial train/val/test losses
+                print(f'Computing {name} errors with devices=1 to avoid batch padding errors', flush=True)
+
+                trainer.test(model, dataloaders=dset)
+
+                true_energies = model.results['true_energies']
+                pred_energies = model.results['pred_energies']
+
+                true_forces = model.results['true_forces']
+                pred_forces = model.results['pred_forces']
+
+                np.savetxt(
+                    os.path.join(args.save_dir, args.prefix+f'true_{name}_energies_'+args.model_type+'.npy'),
+                    true_energies,
+                )
+
+                np.savetxt(
+                    os.path.join(args.save_dir, args.prefix+f'pred_{name}_energies_'+args.model_type+'.npy'),
+                    pred_energies,
+                )
+
+                np.savetxt(
+                    os.path.join(args.save_dir, args.prefix+f'true_{name}_forces_'+args.model_type+'.npy'),
+                    true_forces,
+                )
+
+                np.savetxt(
+                    os.path.join(args.save_dir, args.prefix+f'pred_{name}_forces_'+args.model_type+'.npy'),
+                    pred_forces,
+                )
+
+                rmse_values[name] = {
+                    'energy': np.sqrt(np.average((true_energies - pred_energies)**2)),
+                    'forces': np.sqrt(np.average((true_forces - pred_forces)**2)),
+                }
 
             print('E_RMSE (eV/atom), F_RMSE (eV/Ang)')
-            print(f'\tTrain:\t{train_eloss}, \t{train_floss}')
-            print(f'\tTest:\t{test_eloss}, \t{test_floss}')
-            print(f'\tVal:\t{val_eloss}, \t{val_floss}')
+            print(f'\tTrain:\t{rmse_values["train"]["energy"]}, \t{rmse_values["train"]["forces"]}')
+            # print(f'\tTest:\t{rmse_values["test"]["energy"]}, \t{rmse_values["test"]["forces"]}')
+            # print(f'\tVal:\t{rmse_values["val"]["energy"]}, \t{rmse_values["val"]["forces"]}')
 
-            errors = np.array([
-                [train_eloss, train_floss],
-                [test_eloss, test_floss],
-                [val_eloss, val_floss],
+            model.values_to_compute = ['loss']
+
+    comm.Barrier()  # make sure rank=0 is done with single-GPU calculation
+
+    if not args.compute_landscape:
+        return
+
+    layers = []
+    for k, p in model.named_parameters():
+        if re.search(args.layers_regex, k):
+            layers.append(k)
+
+    model_final = SimpleModelWrapper(model, layers)  # needed for loss_landscapes
+
+    print('MODEL PARAMETERS:')
+    num_params = 0
+    for k, p in model_final.named_parameters():
+        print(k, p.shape)
+        num_params += np.prod(p.shape)
+    print('TOTAL NUM_PARAMS:', num_params)
+
+    if args.distance is not None:
+        distance = args.distance
+    else:
+
+        # Compute the distance to a random model
+        init_model = model.random_model(model_path=args.model_path)
+
+        # model_initial = SimpleModelWrapper(init_model)  # needed for loss_landscapes
+        model_initial = SimpleModelWrapper(init_model, layers)  # needed for loss_landscapes
+
+        start_point = copy.deepcopy(model_initial).get_module_parameters()
+        end_point   = copy.deepcopy(model_final).get_module_parameters()
+
+        with torch.no_grad():
+            diff = ModelParameters([
+                # torch.abs(end_point.parameters[i] - start_point.parameters[i])
+                end_point.parameters[i] - start_point.parameters[i]
+                for i in range(len(start_point.parameters))
             ])
 
-            np.savetxt(
-                os.path.join(args.save_dir, args.prefix+'errors_'+args.model_type),
-                errors,
-                header='col=[E_RMSE, F_RMSE] (eV/atom, eV/Ang); row=[train, test, val]'
-            )
+            # Convert distance to units of multiples of model norm magnitude
+            diff.truediv_(start_point.model_norm())
+            # diff.filter_normalize_(end_point)
+
+        distance = 2*diff.model_norm()
+        logging.info(f"Distance not provided. Using 2x distance to random ({distance}).")
+
 
     # Switch to using a distributed model. Note that this means there will be
     # some noise in the generated landscapes due to batch padding.
-
-    comm.Barrier()  # make sure rank=0 is done with single-GPU calculation
 
     logging.info(f'[rank {rank}] Beginning LL generation')
 

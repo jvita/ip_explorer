@@ -1,11 +1,11 @@
 #!/bin/bash
-#BSUB -J "pain_LL_4gpus_41"
-#BSUB -o "/usr/workspace/vita1/logs/lsf/%J.out"
-#BSUB -e "/usr/workspace/vita1/logs/lsf/%J.err"
-#BSUB -G c02red
-#BSUB -q pbatch
-#BSUB -nnodes 1
-#BSUB -W 12:00
+#SBATCH --job-name "vo_pes_MOLECULE"
+#SBATCH --output "/usr/workspace/vita1/logs/lsf/%J.out"
+#SBATCH --error "/usr/workspace/vita1/logs/lsf/%J.err"
+#SBATCH --account c02red
+#SBATCH --partition pbatch
+#SBATCH -N 1
+#SBATCH -t 00:30:00
 
 # Environment setup
 module load gcc/8.3.1
@@ -20,14 +20,15 @@ export NCCL_DEBUG=INFO
 export PYTHONFAULTHANDLER=1
 export MASTER_ADDR=$(hostname)
 
-LOG_DIR='/g/g20/vita1/ws/logs/ip_explorer/schnet/painn'
-PREFIX='node_'
-DIMENSIONS=3
+LOG_DIR='/g/g20/vita1/ws/logs/ip_explorer/AL_Al/vgop'
+PREFIX=''
+DIMENSIONS=2
 
-sheap -v -hs -rs -1 -p 20 -st 0.4 -dim $DIMENSIONS < "${LOG_DIR}/${PREFIX}representations.xyz" > "${LOG_DIR}/${PREFIX}sheap-${DIMENSIONS}d.xyz"
+sheap -v -hs -rs -1 -p 20 -st 1.0 -dim $DIMENSIONS < "${LOG_DIR}/${PREFIX}representations.xyz" > "${LOG_DIR}/${PREFIX}sheap-${DIMENSIONS}d.xyz"
+# sheap -v -scale -hs -p 20 -st 0.6 -dim $DIMENSIONS < "${LOG_DIR}/${PREFIX}representations.xyz" > "${LOG_DIR}/${PREFIX}sheap-${DIMENSIONS}d.xyz"
 
 python3 -m ip_explorer.pes \
-    --load-dir '/g/g20/vita1/ws/logs/ip_explorer/schnet/painn/' \
+    --load-dir ${LOG_DIR} \
     --prefix ${PREFIX} \
     --n-components ${DIMENSIONS} \
     --scale 0.1 \

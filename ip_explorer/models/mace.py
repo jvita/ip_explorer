@@ -50,12 +50,40 @@ class MACEModelWrapper(PLModelWrapper):
 
         self.model.load_state_dict(state_dict)
 
-        if 'structure_representations' in self.values_to_compute:
+        if ('structure_representations' in self.values_to_compute) or ('atom_representations' in self.values_to_compute):
             self._node_representations = []
             self._register_representations_hook()
 
+        # Back-compatability with default MACE code
+        if not hasattr(self.model, 'no_model_sc'):
+            self.model.no_model_sc = False
+
+        if not hasattr(self.model, 'no_block_sc'):
+            self.model.no_block_sc = False
+
+
     def random_model(self, model_path):
         return torch.load(os.path.join(model_path, 'checkpoints', 'template.model'))
+
+
+    def compute_energies_and_forces(self, batch):
+
+        natoms = torch.unique(batch.batch, return_counts=True)[1]
+
+        true_eng = batch.energy/natoms
+        true_fcs = batch.forces
+
+        results = self.model(batch)
+
+        pred_eng = results['energy']/natoms
+        pred_fcs = results['forces']
+
+        return {
+            'true_energies': true_eng,
+            'pred_energies': pred_eng,
+            'true_forces': true_fcs,
+            'pred_forces': pred_fcs,
+        }
 
 
     def compute_loss(self, batch):
@@ -104,21 +132,6 @@ class MACEModelWrapper(PLModelWrapper):
             if self.representation_type in ['edge', 'both']:
                 raise NotImplementedError("Edge interactions are not supported for MACE yet")
 
-                if isinstance(self.model.representation, SchNet):
-                    x = batch['scalar_representation']
-                    z = x.new_zeros((batch['scalar_representation'].shape[0], self.model.radial_basis.n_rbf))
-
-                    idx_i = batch[structure.idx_i]
-                    idx_j = batch[structure.idx_j]
-
-                    z.index_add_(0, idx_i, batch['distance_representation'])
-                    z.index_add_(0, idx_j, batch['distance_representation'])
-                else:  # PaiNN
-                    z = batch['vector_representation']
-                    z = torch.mean(z, dim=1)  # average over cartesian dimension
-
-                representations.append(z)
-
         self._node_representations = []  # reset logged representations
 
         representations = torch.cat(representations, dim=1)
@@ -126,8 +139,11 @@ class MACEModelWrapper(PLModelWrapper):
 
         per_atom_energies = batch.energy/splits
         per_atom_energies = torch.cat([
-            torch.ones(n)*e for n,e in zip(splits, per_atom_energies)
+            per_atom_energies.new_ones(n)*e for n,e in zip(splits, per_atom_energies)
         ])
+
+        if representations.shape[0] != per_atom_energies.shape[0]:
+            raise RuntimeError(f"Energies shape {per_atom_energies.shape} does not match representations shape {representations.shape}")
 
         return {
             'representations': representations,

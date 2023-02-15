@@ -30,6 +30,19 @@ class SchNetDataModule(PLDataModuleWrapper):
         else:
             self.remove_offsets = ast.literal_eval(kwargs['remove_offsets'])
 
+        if 'train_filename' in kwargs:
+            self.train_filename = kwargs['train_filename']
+        else:
+            self.train_filename = None
+        if 'test_filename' in kwargs:
+            self.test_filename = kwargs['test_filename']
+        else:
+            self.test_filename = None
+        if 'val_filename' in kwargs:
+            self.val_filename = kwargs['val_filename']
+        else:
+            self.val_filename = None
+
         super().__init__(stage=stage, **kwargs)
 
 
@@ -61,6 +74,8 @@ class SchNetDataModule(PLDataModuleWrapper):
         )
 
         datamodule.setup()
+
+        # TODO: allow optional loading of train/test/val files by name
 
         self.train_dataset  = datamodule.train_dataset
         self.test_dataset   = datamodule.test_dataset

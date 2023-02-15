@@ -39,13 +39,27 @@ class NequIPModelWrapper(PLModelWrapper):
     def load_model(self, traindir):
 
         self.model, config = Trainer.load_model_from_training_session(
-            traindir=traindir, model_name='best_model.pth'
+            traindir=traindir,
+            model_name='best_model.pth'
+            # model_name='last_model.pth'
         )
 
         if ('structure_representations' in self.values_to_compute) or ('structure_representations' in self.values_to_compute):
             self._register_representations_hook()
 
         metrics_components = config.get("metrics_components", None)
+
+        if metrics_components is None:
+            # Default metrics
+            metrics_components = [
+                ['forces', 'mae'],
+                ['forces', 'rmse'],
+                ['total_energy', 'mae',  {'PerAtom': False}],
+                ['total_energy', 'mae',  {'PerAtom': True}],
+                ['total_energy', 'rmse', {'PerAtom': False}],
+                ['total_energy', 'rmse', {'PerAtom': True}]
+            ]
+
         metrics, _ = instantiate(
             builder=Metrics,
             prefix="metrics",
@@ -55,13 +69,26 @@ class NequIPModelWrapper(PLModelWrapper):
 
         self.metrics = metrics
 
-    def random_model(self, traindir):
-        config = Config.from_file(traindir + "/config.yaml")
+    def random_model(self, model_path):
+        config = Config.from_file(model_path + "/config.yaml")
 
         return model_from_config(
             config=config,
             initialize=False,
         )
+
+    def compute_energies_and_forces(self, batch):
+        batch_dict = AtomicData.to_AtomicDataDict(batch)
+        out = self.model.forward(batch_dict)
+
+        natoms = torch.unique(out['batch'], return_counts=True)[1]
+
+        return {
+            'true_energies': batch_dict['total_energy']/natoms,
+            'pred_energies': out['total_energy']/natoms,
+            'true_forces': batch_dict['forces'],
+            'pred_forces': out['forces'],
+        }
 
 
     def compute_loss(self, batch):
@@ -85,6 +112,8 @@ class NequIPModelWrapper(PLModelWrapper):
         return {
             'energy': results['e/N_rmse']**2,  # mse isn't implemented yet in nequip
             'force':  results['f_rmse']**2,
+            # 'energy': results['e_mae'],  # mse isn't implemented yet in nequip
+            # 'force':  results['f_mae'],
             'batch_size': int(max(batch_dict[AtomicDataDict.BATCH_KEY])+1),
             'natoms': batch_dict[AtomicDataDict.FORCE_KEY].shape[0],
         }
@@ -130,7 +159,7 @@ class NequIPModelWrapper(PLModelWrapper):
 
         per_atom_energies = batch_dict[AtomicDataDict.TOTAL_ENERGY_KEY]/splits[:, None]
         per_atom_energies = torch.cat([
-            torch.ones(n)*e for n,e in zip(splits, per_atom_energies)
+            per_atom_energies.new_ones(n)*e for n,e in zip(splits, per_atom_energies)
         ])
 
         return {

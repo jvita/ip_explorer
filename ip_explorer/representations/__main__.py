@@ -114,31 +114,40 @@ def main():
 
     representations = model.results['representations'].detach().cpu().numpy()
     representations_energies = model.results['representations_energies'].detach().cpu().numpy()
+    representations_splits = model.results['representations_splits'].detach().cpu().numpy()
 
     print('REPRESENTATIONS SHAPE:', representations.shape)
 
     if representations.shape[0] != representations_energies.shape[0]:
         raise RuntimeError(f"# of representations ({representations.shape[0]}) != # of energies ({representations_energies.shape[0]}).")
 
+    split_cumsum = np.cumsum(representations_splits)[:-1].astype(int)
+    representations = np.array_split(representations, split_cumsum)
+    representations_energies = np.array_split(representations_energies, split_cumsum)
+
     images = []
     for i, (v, e) in enumerate(zip(representations, representations_energies)):
+        natoms = v.shape[0]
         atoms  =  Atoms(
-            'H',
-            positions=[[0,0,0]],
+            f'H{natoms}',
+            positions=np.zeros((natoms, 3)),
             cell=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
         )
 
-        # SHEAP searches for "energy"
-        atoms.info['energy'] = e
+        atoms.arrays['representations'] = v
+        atoms.arrays['representations_energies'] = e
 
-        # SHEAP searches for "SOAP*" keys
-        atoms.info['SOAP-n8-l4-c2.4-g0.3'] = v
+        # # SHEAP searches for "energy"
+        # atoms.arrays['energy'] = e
 
-        # Filler information for SHEAP testing
-        atoms.info['name'] = str(i)
-        atoms.info['pressure']    = 0.0
-        atoms.info['spacegroup']  = 'unknown'
-        atoms.info['times_found'] = 1
+        # # SHEAP searches for "SOAP*" keys
+        # atoms.info['SOAP-n8-l4-c2.4-g0.3'] = v
+
+        # # Filler information for SHEAP testing
+        # atoms.info['name'] = str(i)
+        # atoms.info['pressure']    = 0.0
+        # atoms.info['spacegroup']  = 'unknown'
+        # atoms.info['times_found'] = 1
 
         images.append(atoms)
 

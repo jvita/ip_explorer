@@ -68,18 +68,6 @@ class PLModelWrapper(pl.LightningModule):
         else:
             self.values_to_compute = tuple(values_to_compute)
 
-        # Check compute/aggregate functions
-        for value in self.values_to_compute:
-            try:
-                getattr(self, f'compute_{value}')
-            except AttributeError:
-                raise RuntimeError(f"Failed to find function `compute_{value}`.  Make sure to define 'compute_<value>' and 'aggregate_<value> for each <value> specified in `values_to_compute`")
-
-            try:
-                getattr(self, f'aggregate_{value}')
-            except AttributeError:
-                raise RuntimeError(f"Failed to find function `compute_{value}`.  Make sure to define 'compute_<value>' and 'aggregate_<value> for each <value> specified in `values_to_compute`")
-
         # Other administrative tasks
         self.results = {}
         self.reset_results_on_epoch_start = reset_results_on_epoch_start
@@ -104,7 +92,6 @@ class PLModelWrapper(pl.LightningModule):
         populated.
         """
         raise NotImplementedError
-
 
     def random_model(self):
         """
@@ -191,6 +178,10 @@ class PLModelWrapper(pl.LightningModule):
         self.results['f_rmse'] = f_rmse
 
 
+    def compute_energies(self, batch):
+        raise NotImplementedError
+
+
     def compute_structure_representations(self, batch):
 
         retvals = self.compute_atom_representations(batch)
@@ -218,6 +209,43 @@ class PLModelWrapper(pl.LightningModule):
 
     def compute_atom_representations(self, batch):
         raise NotImplementedError
+
+
+    def aggregate_energies_and_forces(self, step_outputs):
+        # On each worker, compute the per-structure average representations
+        true_energies = []
+        pred_energies = []
+        true_forces = []
+        pred_forces = []
+        for s in step_outputs:
+            true_energies.append(s['true_energies'])
+            pred_energies.append(s['pred_energies'])
+            true_forces.append(s['true_forces'])
+            pred_forces.append(s['pred_forces'])
+
+        true_energies = torch.cat(true_energies)
+        pred_energies = torch.cat(pred_energies)
+        true_forces = torch.cat(true_forces)
+        pred_forces = torch.cat(pred_forces)
+
+        # Now gather everything
+        true_energies = self.all_gather(true_energies)
+        pred_energies = self.all_gather(pred_energies)
+        true_forces = self.all_gather(true_forces)
+        pred_forces = self.all_gather(pred_forces)
+
+        # Reshape to remove the num_processes dimension.
+        # NOTE: order is likely not going to match dataloader order
+        true_energies = torch.flatten(true_energies, 0, -1)
+        pred_energies = torch.flatten(pred_energies, 0, -1)
+        true_forces = torch.flatten(true_forces, 0, -1)
+        pred_forces = torch.flatten(pred_forces, 0, -1)
+
+        self.results['true_energies'] = true_energies.detach().cpu().numpy()
+        self.results['pred_energies'] = pred_energies.detach().cpu().numpy()
+        self.results['true_forces'] = true_forces.detach().cpu().numpy()
+        self.results['pred_forces'] = pred_forces.detach().cpu().numpy()
+
 
     def aggregate_structure_representations(self, step_outputs):
         """
@@ -261,16 +289,20 @@ class PLModelWrapper(pl.LightningModule):
         # On each worker, compute the per-structure average representations
         per_atom_representations  = []
         per_atom_energies         = []
+        per_struct_splits         = []
         for s in step_outputs:
             per_atom_representations.append(s['representations'])
             per_atom_energies.append(s['representations_energy'])
+            per_struct_splits.append(torch.Tensor(s['representations_splits']))
 
         per_atom_representations = torch.vstack(per_atom_representations)
         per_atom_energies        = torch.cat(per_atom_energies)
+        per_struct_splits        = torch.cat(per_struct_splits)
 
         # Now gather everything
         per_atom_representations = self.all_gather(per_atom_representations)
         per_atom_energies = self.all_gather(per_atom_energies)
+        per_struct_splits = self.all_gather(per_struct_splits)
 
         # Reshape to remove the num_processes dimension.
         # NOTE: order is likely not going to match dataloader order
@@ -278,14 +310,17 @@ class PLModelWrapper(pl.LightningModule):
             per_atom_representations, 0, 1
         )
         per_atom_energies = torch.flatten(per_atom_energies, 0, 1)
+        per_struct_splits = torch.flatten(per_struct_splits, 0, 1)
 
         n_reps = per_atom_representations.shape[0]
         n_engs = per_atom_energies.shape[0]
 
         assert n_reps == n_engs, "Incompatible shapes: {} representations, {} atoms".format(n_reps, n_engs)
+        assert per_struct_splits.sum() == n_reps, "Incompatible shapes: {} representations, {} splits sum".format(n_reps, per_struct_splits.sum())
 
         self.results['representations'] = per_atom_representations
         self.results['representations_energies'] = per_atom_energies
+        self.results['representations_splits'] = per_struct_splits
 
 
     def on_test_epoch_start(self):
