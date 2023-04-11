@@ -22,6 +22,7 @@ class EnergyForceLoss(loss_landscapes.metrics.Metric):
         data_loader,
         evaluation_fxn=None,
         loss_type='both',
+        aggregation_method='rmse',
         ):
         """
         Arguments:
@@ -33,11 +34,15 @@ class EnergyForceLoss(loss_landscapes.metrics.Metric):
 
             loss_type (str, default='both'):
                 One of ['energy', 'force', 'both'].
+
+            aggregation_method (str, default='rmse'):
+                One of ['rmse', 'max']
         """
         super().__init__()
-        self.data_loader    = data_loader
-        self.evaluation_fxn = evaluation_fxn
-        self.loss_type      = loss_type
+        self.data_loader      = data_loader
+        self.evaluation_fxn   = evaluation_fxn
+        self.loss_type        = loss_type
+        self.aggregation_method = aggregation_method
 
 
     def __call__(self, model_wrapper: ModelWrapper) -> tuple:
@@ -51,8 +56,12 @@ class EnergyForceLoss(loss_landscapes.metrics.Metric):
         """
         self.evaluation_fxn(model_wrapper.modules[0], self.data_loader)
 
-        loss_eng = model_wrapper.modules[0].results['e_rmse']
-        loss_fcs = model_wrapper.modules[0].results['f_rmse']
+        if self.aggregation_method == 'rmse':
+            loss_eng = model_wrapper.modules[0].results['e_rmse']
+            loss_fcs = model_wrapper.modules[0].results['f_rmse']
+        elif self.aggregation_method == 'max':
+            loss_eng = model_wrapper.modules[0].results['e_max']
+            loss_fcs = model_wrapper.modules[0].results['f_max']
 
         if self.loss_type == 'energy':
             return loss_eng

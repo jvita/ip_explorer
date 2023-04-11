@@ -24,6 +24,11 @@ class NequIPDataModule(PLDataModuleWrapper):
                         keys.
         """
 
+        if 'root' in kwargs:
+            self.dataset_root = kwargs['root']
+        else:
+            self.dataset_root = None
+
         if 'train_filename' in kwargs:
             self.train_filename = kwargs['train_filename']
         else:
@@ -67,6 +72,10 @@ class NequIPDataModule(PLDataModuleWrapper):
             dataset_config['test_dataset_file_name'] = self.test_filename
         if self.val_filename is not None:
             dataset_config['validation_dataset_file_name'] = self.val_filename
+
+        if self.dataset_root is not None:
+            print('Loading processed dataset', flush=True)
+            dataset_config['dataset_extra_fixed_fields']['root'] = self.dataset_root
 
         if 'dataset' in dataset_config:
             self.train_dataset  = dataset_from_config(dataset_config, prefix="dataset")

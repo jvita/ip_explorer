@@ -33,6 +33,11 @@ class NequIPModelWrapper(PLModelWrapper):
         else:
             self.representation_type = 'node'
 
+        if 'model_file_name' in kwargs:
+            self.model_file_name = kwargs['model_file_name']
+        else:
+            self.model_file_name = 'best_model.pth'
+
         super().__init__(model_dir=model_dir, **kwargs)
 
 
@@ -40,8 +45,7 @@ class NequIPModelWrapper(PLModelWrapper):
 
         self.model, config = Trainer.load_model_from_training_session(
             traindir=traindir,
-            model_name='best_model.pth'
-            # model_name='last_model.pth'
+            model_name=self.model_file_name
         )
 
         if ('structure_representations' in self.values_to_compute) or ('structure_representations' in self.values_to_compute):

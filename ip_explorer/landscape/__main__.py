@@ -71,6 +71,7 @@ parser.set_defaults(compute_landscape=True)
 parser.add_argument( '--batch-size', type=int, help='Batch size for data loaders', dest='batch_size', default=128, required=False,)
 
 parser.add_argument( '--loss-type', type=str, help='"energy", "force" or None', dest='loss_type', default=None, required=False,) 
+parser.add_argument( '--aggregation-method', type=str, help='Method for aggregating over batches. Must be "rmse" or "max"', dest='aggregation_method', default="rmse", required=False,) 
 parser.add_argument( '--distance', type=float, help='Fractional distance in parameterspace', dest='distance') 
 parser.add_argument( '--steps', type=int, help='Number of grid steps in each direction in parameter space', dest='steps', required=True,) 
 parser.add_argument( '--n-lines', type=int, help='Number of lines to evaluate if `landscape-type=="lines"`. Default is same as `steps`', dest='n_lines') 
@@ -277,8 +278,9 @@ def main():
     )
 
     metric = EnergyForceLoss(
-        evaluation_fxn = trainer.test,
-        data_loader=datamodule.train_dataloader()
+        evaluation_fxn=trainer.test,
+        data_loader=datamodule.train_dataloader(),
+        aggregation_method=args.aggregation_method,
     )
 
     if args.landscape_type == 'lines':
@@ -319,113 +321,6 @@ def main():
         full_path = os.path.join(args.save_dir, args.prefix+save_name+args.model_type)
         np.save(full_path, loss_data_fin[1])
 
-        # eng_loss = loss_data_fin[0]
-        # fcs_loss = loss_data_fin[1]
-
-        # # Generate figures
-        # fig = plt.figure(figsize=(12, 4))
-
-        # # Energy loss only
-        # ax = fig.add_subplot(1, 3, 1, projection='3d')
-        # ax.dist = 13
-
-        # ticks      = np.array([0, args.steps//2, args.steps-1])
-        # ticklabels = np.array([-distance/2, 0, distance/2])
-
-        # X = np.array([[j for j in range(eng_loss.shape[0])] for i in range(eng_loss.shape[1])])
-        # Y = np.array([[i for _ in range(eng_loss.shape[0])] for i in range(eng_loss.shape[1])])
-
-        # ax.plot_surface(X, Y, eng_loss, rstride=1, cstride=1, cmap='viridis', edgecolor='none')
-
-        # ax.set_xticks(ticks)
-        # ax.set_yticks(ticks)
-        # ax.set_xticklabels(ticklabels)
-        # ax.set_yticklabels(ticklabels)
-        # ax.set_title(e_title, pad=10)
-        # ax.set_xlabel(r"Normalized $d_1$", fontsize=12, labelpad=10)
-        # ax.set_ylabel(r"Normalized $d_2$", fontsize=12, labelpad=10)
-
-        # # Forces loss only
-        # ax = fig.add_subplot(1, 3, 2, projection='3d')
-        # ax.dist = 13
-
-        # ax.plot_surface(X, Y, fcs_loss, rstride=1, cstride=1, cmap='viridis', edgecolor='none')
-
-        # ax.set_xticks(ticks)
-        # ax.set_yticks(ticks)
-        # ax.set_xticklabels(ticklabels)
-        # ax.set_yticklabels(ticklabels)
-        # ax.set_title(f_title, pad=10)
-        # ax.set_xlabel(r"Normalized $d_1$", fontsize=12, labelpad=10)
-        # ax.set_ylabel(r"Normalized $d_2$", fontsize=12, labelpad=10)
-
-        # # Combined
-        # ax = fig.add_subplot(1, 3, 3, projection='3d')
-        # ax.dist = 13
-
-        # ax.plot_surface(X, Y, total, rstride=1, cstride=1, cmap='viridis', edgecolor='none')
-
-        # ax.set_xticks(ticks)
-        # ax.set_yticks(ticks)
-        # ax.set_xticklabels(ticklabels)
-        # ax.set_yticklabels(ticklabels)
-        # ax.set_title(l_title, pad=10)
-        # ax.set_xlabel(r"Normalized $d_1$", fontsize=12, labelpad=10)
-        # ax.set_ylabel(r"Normalized $d_2$", fontsize=12, labelpad=10)
-
-        # _ = plt.tight_layout()
-
-        # save_name = 'L={}_d={:.2f}_s={}-3d_{}.png'.format('forces', distance, args.steps, args.model_type)
-        # full_path = os.path.join(args.save_dir, args.prefix+save_name)
-        # plt.savefig(full_path)
-
-        # fig, axes = plt.subplots(1, 3, figsize=(12, 4))
-
-        # # Energy loss only
-        # ax = axes[0]
-        # c = ax.imshow(eng_loss)
-        # cbar = fig.colorbar(c, ax=ax, fraction=0.045)
-
-        # ax.set_xticks(ticks)
-        # ax.set_yticks(ticks)
-        # ax.set_xticklabels(ticklabels)
-        # ax.set_yticklabels(ticklabels)
-        # ax.set_title(e_title, pad=10)
-        # ax.set_aspect('equal')
-
-        # # Forces loss only
-        # ax = axes[1]
-        # c = ax.imshow(fcs_loss)
-        # cbar = fig.colorbar(c, ax=ax, fraction=0.045)
-
-        # ax.set_xticks(ticks)
-        # ax.set_yticks(ticks)
-        # ax.set_xticklabels(ticklabels)
-        # ax.set_yticklabels(ticklabels)
-        # ax.set_title(f_title, pad=10)
-        # ax.set_aspect('equal')
-
-        # # Combined
-        # ax = axes[2]
-        # c = ax.imshow(total)
-        # cbar = fig.colorbar(c, ax=ax, fraction=0.045)
-
-        # ax.set_xticks(ticks)
-        # ax.set_yticks(ticks)
-        # ax.set_xticklabels(ticklabels)
-        # ax.set_yticklabels(ticklabels)
-        # ax.set_title(l_title, pad=10)
-        # ax.set_aspect('equal')
-
-        # fig.text(0.5, 0.0, r'Normalized $d_1$', ha='center', fontsize=12)
-        # fig.text(0.0, 0.5, r'Normalized $d_2$', va='center', rotation='vertical', fontsize=12)
-
-        # _ = plt.tight_layout()
-
-        # save_name = 'L={}_d={:.2f}_s={}-2d_{}.png'.format('forces', distance, args.steps, args.model_type)
-        # full_path = os.path.join(args.save_dir, args.prefix+save_name)
-        # plt.savefig(full_path)
-
         print("Saving results in:", args.save_dir)
 
         print('Done generating loss landscape!')
@@ -433,21 +328,6 @@ def main():
 
 if __name__ == '__main__':
     os.environ['GPUS_PER_NODE'] = str(args.gpus_per_node)
-
-    # # use lsf job id for the port number
-    # # guarantees unique ports across jobs from same grid search
-    # try:
-    #     # use the last 4 numbers in the job id as the id
-    #     default_port = os.environ['LSB_JOBID']
-    #     default_port = default_port[-4:]
-
-    #     # all ports should be in the 10k+ range
-    #     default_port = int(default_port) + 10000
-
-    # except Exception as e:
-    #     default_port = 12910
-
-    # os.environ['MASTER_PORT']   = str(default_port)
 
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()

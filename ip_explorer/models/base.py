@@ -154,6 +154,10 @@ class PLModelWrapper(pl.LightningModule):
             None. Results must be stored under `self.results`.
         """
 
+        # Note: this will return the maximum batch-averaged value.
+        self.results['e_max'] = np.max([s['energy'] for s in step_outputs])
+        self.results['f_max'] = np.max([s['force'] for s in step_outputs])
+
         # compute_loss MUST return the MSE or MAE so weighted aggregation is correct
         e_rmse = torch.Tensor([s['energy']*s['batch_size'] for s in step_outputs])
         f_rmse = torch.Tensor([s['force']*s['natoms'] for s in step_outputs])
