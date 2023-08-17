@@ -12,9 +12,11 @@ This package was developed as part of the work done in:
 * J. Vita and D. Schwalbe-Koda, "[Data efficiency and extrapolation trends in neural network interatomic potentials](https://doi.org/10.1088/2632-2153/acf115)", _2023 Mach. Learn.: Sci.  Technol_.
 
 ## Installation
-`git clone https://github.com/jvita/ip_explorer.git`
-`cd ip_explorer`
-`pip install -e .`
+```
+git clone https://github.com/jvita/ip_explorer.git
+cd ip_explorer
+pip install -e .
+```
 
 # Available tools
 * simple energy/force predictions
