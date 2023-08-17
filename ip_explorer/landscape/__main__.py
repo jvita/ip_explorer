@@ -22,7 +22,6 @@ import torchmetrics
 import os
 import argparse
 import numpy as np
-import matplotlib.pyplot as plt
 from mpi4py import MPI
 
 import pytorch_lightning as pl
