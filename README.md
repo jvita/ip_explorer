@@ -67,7 +67,7 @@ model that implements the necessary compute/aggregate functions will then be
 able to use the new tool.
 
 # Authors
-* Josh Vita (jvita2@illinois.edu)
+* Josh Vita (vita1@llnl.gov)
 * Daniel Schwalbe-Koda (schwalbekoda1@llnl.gov)
 
 ## Release
