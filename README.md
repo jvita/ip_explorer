@@ -66,6 +66,20 @@ computed/aggregated using the `compute_*()` and `aggregate_*()` functions. Any
 model that implements the necessary compute/aggregate functions will then be
 able to use the new tool.
 
+# Citing
+If you use `ip_explorer` in a publication, please cite the following paper:
+
+```
+@misc{Vita2023,
+  title = {Data efficiency and extrapolation trends in neural network interatomic potentials},
+  author = {Vita,  Joshua A. and Schwalbe-Koda,  Daniel},
+  publisher = {arXiv},
+  year = {2023},
+  doi = {10.48550/ARXIV.2302.05823},
+  url = {https://arxiv.org/abs/2302.05823},
+}
+```
+
 # Authors
 * Josh Vita (vita1@llnl.gov)
 * Daniel Schwalbe-Koda (schwalbekoda1@llnl.gov)
