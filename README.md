@@ -34,6 +34,7 @@ pip install -e .
 * [ASE](https://wiki.fysik.dtu.dk/ase/)
 * [PytorchLightning](https://lightning.ai/docs/pytorch/stable/)
 * [loss-landscapes](https://github.com/marcellodebernardi/loss-landscapes)
+  * This package has been patched to allow for more efficient evaluation of the landscapes. The patched version of the code is included in [patches/loss_landscapes](https://github.com/jvita/ip_explorer/tree/main/patches/loss_landscapes)
 
 # Code structure
 
