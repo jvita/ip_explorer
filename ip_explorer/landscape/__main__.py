@@ -161,6 +161,7 @@ def main():
                 num_nodes=1,
                 devices=1,
                 accelerator='cuda',
+                inference_mode=False,
             )
 
             datasets_to_check = {
@@ -274,6 +275,7 @@ def main():
         accelerator='cuda',
         strategy='ddp',
         enable_progress_bar=False,
+        inference_mode=False,
     )
 
     metric = EnergyForceLoss(

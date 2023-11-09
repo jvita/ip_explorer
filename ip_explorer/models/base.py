@@ -84,6 +84,8 @@ class PLModelWrapper(pl.LightningModule):
         if self.model is None:
             raise RuntimeError("Failed to load model. Make sure to implement `load_model()` and assign `self.model`")
 
+        self.step_outputs = []  # for logging test outputs, for lightnig v2.1.1
+
 
     def load_model(self, model_dir):
         """
@@ -350,12 +352,13 @@ class PLModelWrapper(pl.LightningModule):
             if isinstance(v, torch.Tensor):
                 results[k] = v.detach()#.cpu().numpy()
 
-        return results
+        self.step_outputs.append(results)
 
-    def test_epoch_end(self, step_outputs):
+
+    def on_test_epoch_end(self):#, step_outputs):
         for value in self.values_to_compute:
             aggregation_fxn = getattr(self, f'aggregate_{value}')
-            aggregation_fxn(step_outputs)
+            aggregation_fxn(self.step_outputs)
 
 
     def copy(self, model_path):

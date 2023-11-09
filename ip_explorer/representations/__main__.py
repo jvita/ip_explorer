@@ -107,6 +107,7 @@ def main():
         devices=args.gpus_per_node,
         accelerator='cuda',
         strategy='ddp',
+        inference_mode=False,
         # enable_progress_bar=False,
     )
 
